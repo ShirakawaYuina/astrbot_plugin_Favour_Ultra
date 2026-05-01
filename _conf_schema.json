@@ -1,0 +1,207 @@
+{
+    "favour_mode": {
+        "description": "好感度判定模式",
+        "type": "string",
+        "default": "galgame",
+        "options": ["galgame", "realistic"],
+        "hint": "Galgame 模式：好感度更容易提升，性格更宽容。\n拟真模式：好感度提升更严格，性格更复杂，更难取悦。"
+    },
+    "is_global_favour": {
+        "description": "是否使用全局好感度模式",
+        "type": "bool",
+        "default": false,
+        "hint": "开启时所有对话共享同一份好感度；关闭时每个会话独立计算。\n目前开启全局模式后，独立会话好感度不会同步，用于防止刷分。"
+    },
+    "group_sort_by": {
+        "description": "群组好感度排序方式",
+        "type": "string",
+        "default": "default",
+        "options": ["default", "favour", "nickname", "userid"],
+        "hint": "default：按添加时间排序\nfavour：按好感度从高到低排序\nnickname：按昵称 A-Z 排序\nuserid：按用户 ID 排序"
+    },
+    "enable_relationship_table": {
+        "description": "是否向 LLM 注入当前会话关系表",
+        "type": "bool",
+        "default": true,
+        "hint": "开启后，会在 Prompt 中告知 LLM 当前群聊内其他已建立关系的用户，例如：用户123 | 挚友 | 90。这有助于处理复杂的人际关系。"
+    },
+    "min_favour_value": {
+        "description": "好感度数值下限（例如 -100）",
+        "type": "int",
+        "default": -100,
+        "hint": "修改后记得同步调整好感度规则提示词。"
+    },
+    "max_favour_value": {
+        "description": "好感度数值上限（例如 100）",
+        "type": "int",
+        "default": 100,
+        "hint": "修改后记得同步调整好感度规则提示词。"
+    },
+    "default_favour": {
+        "description": "普通用户初始好感度",
+        "type": "int",
+        "default": 0,
+        "hint": "新用户首次交互时的初始好感度。请不要超出你设置的上下限范围。"
+    },
+    "favour_rule_prompt": {
+        "description": "自定义好感度规则提示词",
+        "type": "text",
+        "default": "- 好感度等级：根据好感度数值的高低，共分为十个等级。\n- [-100~-81]：`极度厌恶`。无论用户说什么，你都会感到强烈嫌恶。如果没有特殊剧情推动，该等级用户几乎无法提升好感度。\n- [-80~-61]：`厌恶`。你会明显抗拒与用户交流，但仍可能因长期正向互动略微回升。\n- [-60~-41]：`反感`。你会明确表达不适与排斥，此等级下仍允许正常增减好感度。\n- [-40~-21]：`冷淡`。你会保持疏离，回复克制，情绪起伏很小。\n- [-20~-1]：`疏远`。你会礼貌但有距离感，不会主动亲近用户。\n- [0~19]：`普通`。你把用户视为普通朋友，态度平稳，但会反感越界行为，如强行亲密接触等。\n- [20~39]：`熟悉`。你开始了解用户，愿意进行更自然的日常交流，并提及共同话题。\n- [40~59]：`在意`。你会更主动互动，愿意分享情绪，开始真正关注用户的状态。\n- [60~99]：`亲密`。你对用户高度信任，通常不会因普通互动感到不适，会表现出明显陪伴感。\n- [100]：`宿命回响`。这是最高等级。你对用户抱有极深感情，会触发专属台词、特殊互动和强烈的宿命感表达。",
+        "hint": "用于补充好感度规则，控制 LLM 在不同好感度阶段对用户的态度与反馈方式。"
+    },
+    "max_daily_favour_increase": {
+        "description": "每日可获取的最大好感度",
+        "type": "int",
+        "default": 20,
+        "hint": "限制用户每天最多可以提升多少好感度。"
+    },
+    "template": {
+        "description": "好感度图片模板",
+        "type": "string",
+        "default": "default",
+        "options": ["default", "style2"],
+        "hint": "选择生成好感度图片时使用的模板。"
+    },
+    "advanced_config": {
+        "description": "高级配置",
+        "type": "object",
+        "hint": "包含数值波动范围、管理员设置、黑白名单和惩罚机制等高级选项。",
+        "items": {
+            "admin_default_favour": {
+                "description": "框架管理员或特使的初始好感度",
+                "type": "int",
+                "default": 50,
+                "hint": "Bot 管理员和好感度特使默认使用的初始好感度。"
+            },
+            "favour_envoys": {
+                "description": "好感度特使用户 ID 列表",
+                "type": "list",
+                "default": [],
+                "hint": "列表中的用户将获得与管理员相同的初始好感度。一行一个，回车确认。"
+            },
+            "favour_increase_min": {
+                "description": "好感度上升最小值",
+                "type": "int",
+                "default": 1,
+                "hint": "LLM 返回好感度上升时允许的最小幅度。"
+            },
+            "favour_increase_max": {
+                "description": "好感度上升最大值",
+                "type": "int",
+                "default": 3,
+                "hint": "LLM 返回好感度上升时允许的最大幅度。"
+            },
+            "favour_decrease_min": {
+                "description": "好感度下降最小值（绝对值）",
+                "type": "int",
+                "default": 1,
+                "hint": "LLM 返回好感度下降时允许的最小幅度。"
+            },
+            "favour_decrease_max": {
+                "description": "好感度下降最大值（绝对值）",
+                "type": "int",
+                "default": 5,
+                "hint": "LLM 返回好感度下降时允许的最大幅度。"
+            },
+            "level_threshold": {
+                "description": "高等级成员的群等级阈值",
+                "type": "int",
+                "default": 50,
+                "hint": "群成员等级达到此值时，视为 HIGH 权限。"
+            },
+            "blocked_sessions": {
+                "description": "会话黑名单",
+                "type": "list",
+                "default": [],
+                "hint": "在此列表中的会话 ID 将不启用好感度系统。"
+            },
+            "allowed_sessions": {
+                "description": "会话白名单",
+                "type": "list",
+                "default": [],
+                "hint": "如果此列表不为空，则只有在此列表中的会话才会启用好感度系统。"
+            },
+            "impression_provider": {
+                "description": "印象生成专用模型",
+                "type": "string",
+                "default": "",
+                "hint": "可选。选择用于生成用户印象的 LLM Provider。留空时使用当前默认 Provider。",
+                "_special": "select_provider"
+            },
+            "natural_dialogue_rounds": {
+                "description": "自然对话轮数阈值",
+                "type": "int",
+                "default": 8,
+                "hint": "每完成多少轮自然对话刷新一次印象。一问一答为一轮，不参考命令。"
+            },
+            "penalty_config": {
+                "description": "惩罚机制配置",
+                "type": "object",
+                "hint": "用于配置刷分行为的检测和惩罚规则。",
+                "items": {
+                    "enable_penalty": {
+                        "description": "是否启用惩罚机制",
+                        "type": "bool",
+                        "default": true,
+                        "hint": "开启后会检测并惩罚刷分行为。"
+                    },
+                    "penalty_whitelist": {
+                        "description": "惩罚白名单",
+                        "type": "list",
+                        "default": [],
+                        "hint": "白名单中的用户 ID 不会触发刷好感检测。一行一个，回车确认。"
+                    },
+                    "use_llm_for_spam_detection": {
+                        "description": "是否使用 LLM 复核刷分行为",
+                        "type": "bool",
+                        "default": true,
+                        "hint": "开启后，会调用 LLM 分析用户行为来判断是否存在刷好感度行为。注意这会增加 API 调用开销。"
+                    },
+                    "spam_detection_message_count": {
+                        "description": "刷分检测消息上下文数量",
+                        "type": "int",
+                        "default": 10,
+                        "hint": "LLM 复核时使用的最近消息记录数量。"
+                    },
+                    "spam_detection_time_window": {
+                        "description": "刷分检测时间窗口（秒）",
+                        "type": "int",
+                        "default": 60,
+                        "hint": "LLM 复核时分析的时间窗口，默认 60 秒。"
+                    },
+                    "penalty_duration": {
+                        "description": "惩罚持续时间（分钟）",
+                        "type": "int",
+                        "default": 5,
+                        "hint": "检测到刷好感行为后的惩罚持续时间，在此期间好感度无法上涨。"
+                    }
+                }
+            }
+        }
+    },
+    "favour_reset_config": {
+        "description": "好感度回归配置",
+        "type": "object",
+        "hint": "配置好感度回归功能，定时将负好感度重置为0。",
+        "items": {
+            "enable_favour_reset": {
+                "description": "是否启用好感度回归",
+                "type": "bool",
+                "default": true,
+                "hint": "开启后，将在指定时间自动将好感度低于0的用户重置为0。"
+            },
+            "favour_reset_day": {
+                "description": "每周几执行回归",
+                "type": "int",
+                "default": 0,
+                "hint": "0=周一, 1=周二, ..., 6=周日"
+            },
+            "favour_reset_time": {
+                "description": "执行时间",
+                "type": "string",
+                "default": "23:59:59",
+                "hint": "格式: HH:MM:SS，例如 23:59:59"
+            }
+        }
+    }
+}

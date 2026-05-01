@@ -1,0 +1,1327 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="theme-color" content="#F5F5F7" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#1C1C1E" media="(prefers-color-scheme: dark)" />
+  <title>AstrBot 好感度系统预览</title>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css" integrity="sha384-wcIxkf4k558AjM3Yz3BBFQUbk/zgIYC2R0QpeeYb+TwlBVMrlgLqwRjRtGZiK7ww" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+
+  <style>
+    :root {
+      --apple-bg: #F5F5F7;
+      --apple-surface: rgba(255, 255, 255, 0.72);
+      --apple-surface-2: rgba(255, 255, 255, 0.90);
+      --apple-text: #1D1D1F;
+      --apple-muted: rgba(29, 29, 31, 0.62);
+      --apple-border: rgba(0, 0, 0, 0.10);
+      --apple-accent: #0071E3;
+
+      --apple-success: #1E8E3E;
+      --apple-danger: #C62828;
+      --apple-neutral: rgba(29, 29, 31, 0.70);
+
+      --table-bg: rgba(255, 255, 255, 0.66);
+      --table-header-bg: rgba(244, 246, 248, 0.72);
+      --table-border: rgba(17, 24, 39, 0.10);
+      --table-divider: rgba(17, 24, 39, 0.08);
+
+      --pill-gray-bg: rgba(244, 246, 248, 0.78);
+      --pill-gray-border: rgba(17, 24, 39, 0.18);
+      --pill-gray-text: rgba(17, 24, 39, 0.74);
+
+      --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.08);
+      --shadow-2: 0 16px 45px rgba(0, 0, 0, 0.12);
+
+      --radius: 12px;
+      --radius-sm: 8px;
+      --max: 980px;
+      --ease: cubic-bezier(0.2, 0.9, 0.2, 1);
+
+      --font-display: "HarmonyOS Sans SC", "Source Han Sans SC", "Noto Sans SC", "Microsoft YaHei UI", "PingFang SC", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --apple-bg: #1C1C1E;
+        --apple-surface: rgba(28, 28, 30, 0.58);
+        --apple-surface-2: rgba(28, 28, 30, 0.80);
+        --apple-text: rgba(255, 255, 255, 0.92);
+        --apple-muted: rgba(255, 255, 255, 0.62);
+        --apple-border: rgba(255, 255, 255, 0.12);
+        --apple-accent: #2997FF;
+
+        --apple-success: #34A853;
+        --apple-danger: #FF6B6B;
+        --apple-neutral: rgba(255, 255, 255, 0.72);
+
+        --table-bg: rgba(28, 28, 30, 0.70);
+        --table-header-bg: rgba(255, 255, 255, 0.08);
+        --table-border: rgba(255, 255, 255, 0.16);
+        --table-divider: rgba(255, 255, 255, 0.10);
+
+        --pill-gray-bg: rgba(255, 255, 255, 0.08);
+        --pill-gray-border: rgba(255, 255, 255, 0.18);
+        --pill-gray-text: rgba(255, 255, 255, 0.74);
+
+        --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.35);
+        --shadow-2: 0 16px 55px rgba(0, 0, 0, 0.52);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      color: var(--apple-text);
+      background:
+        radial-gradient(1200px 500px at 20% 0%, rgba(0, 113, 227, 0.10), transparent 55%),
+        radial-gradient(1000px 520px at 80% 10%, rgba(187, 134, 252, 0.12), transparent 60%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.35), transparent 40%),
+        var(--apple-bg);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+      word-break: break-word;
+      overflow-x: hidden;
+      font-size: clamp(14px, 0.35vw + 14px, 18px);
+    }
+
+    .app {
+      min-height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      background: var(--apple-surface);
+      border-bottom: 1px solid var(--apple-border);
+    }
+
+    .topbar-inner {
+      max-width: var(--max);
+      margin: 0 auto;
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .brand-title {
+      margin: 0;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      font-size: clamp(18px, 1vw + 16px, 28px);
+      line-height: 1.15;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .version {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 400;
+      font-size: 0.95rem;
+      color: var(--apple-muted);
+      white-space: nowrap;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--apple-border);
+      background: var(--apple-surface-2);
+      box-shadow: var(--shadow-1);
+      transform: translateZ(0);
+      transition: transform 0.2s var(--ease), border-color 0.2s var(--ease);
+    }
+
+    .version:hover {
+      transform: translateY(-1px);
+      border-color: color-mix(in srgb, var(--apple-accent) 30%, var(--apple-border));
+    }
+
+    .spark {
+      width: 120px;
+      height: 26px;
+      border-radius: 999px;
+      border: 1px solid var(--apple-border);
+      background: var(--apple-surface-2);
+      box-shadow: var(--shadow-1);
+      padding: 6px 10px;
+      display: none;
+      align-items: center;
+    }
+
+    @media (min-width: 820px) {
+      .spark { display: inline-flex; }
+    }
+
+    .spark svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .page {
+      flex: 1;
+      max-width: var(--max);
+      width: 100%;
+      margin: 0 auto;
+      padding: 22px 18px 64px;
+    }
+
+    #content {
+      background: color-mix(in srgb, var(--apple-surface-2) 85%, transparent);
+      border: 1px solid var(--apple-border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-2);
+      padding: clamp(18px, 2.5vw, 34px);
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.3s var(--ease), transform 0.3s var(--ease);
+    }
+
+    #content.is-ready {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+      margin: 22px 0 10px;
+      line-height: 1.25;
+      letter-spacing: -0.02em;
+      color: var(--apple-text);
+      font-family: var(--font-display);
+    }
+
+    h1 {
+      margin: 0 0 14px;
+      font-size: clamp(24px, 1.2vw + 20px, 30px);
+      font-weight: 700;
+      line-height: 1.18;
+      letter-spacing: -0.015em;
+      color: color-mix(in srgb, var(--apple-text) 94%, transparent);
+    }
+
+    h2 {
+      font-size: clamp(18px, 0.6vw + 16px, 22px);
+      font-weight: 650;
+      padding-bottom: 10px;
+      border-bottom: 1px solid color-mix(in srgb, var(--apple-border) 100%, transparent);
+    }
+    h3 { font-size: 1.18em; font-weight: 600; color: color-mix(in srgb, var(--apple-text) 78%, var(--apple-muted)); }
+    h4, h5, h6 { font-weight: 600; color: color-mix(in srgb, var(--apple-text) 72%, var(--apple-muted)); }
+
+    h1.has-icon, h2.has-icon {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 12px;
+    }
+
+    .title-main {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .title-meta {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--pill-gray-border);
+      background: var(--pill-gray-bg);
+      color: color-mix(in srgb, var(--pill-gray-text) 86%, var(--apple-muted));
+      font-size: 0.62em;
+      font-weight: 650;
+      letter-spacing: -0.005em;
+      white-space: nowrap;
+      margin-left: 2px;
+    }
+
+    .hicon {
+      width: 28px;
+      height: 28px;
+      flex: 0 0 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 9px;
+      border: 1px solid color-mix(in srgb, var(--apple-accent) 18%, var(--apple-border));
+      background:
+        radial-gradient(18px 18px at 25% 25%, color-mix(in srgb, var(--apple-accent) 26%, transparent), transparent 60%),
+        linear-gradient(135deg, color-mix(in srgb, var(--apple-accent) 18%, var(--apple-surface-2)), color-mix(in srgb, #BB86FC 12%, var(--apple-surface-2)));
+      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.05);
+      color: color-mix(in srgb, var(--apple-accent) 85%, var(--apple-text));
+    }
+
+    .hicon-heart {
+      width: 32px;
+      height: 32px;
+      flex: 0 0 32px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .hicon-heart svg {
+      width: 32px;
+      height: 32px;
+      display: block;
+    }
+
+    .hicon svg {
+      width: 18px;
+      height: 18px;
+      display: block;
+    }
+
+    .hicon path, .hicon rect {
+      vector-effect: non-scaling-stroke;
+    }
+
+    p { margin: 14px 0; color: var(--apple-text); }
+    strong { font-weight: 600; color: var(--apple-text); }
+
+    a {
+      color: var(--apple-accent);
+      text-decoration: none;
+      transition: transform 0.2s var(--ease), color 0.2s var(--ease);
+    }
+
+    a:hover { color: color-mix(in srgb, var(--apple-accent) 88%, var(--apple-text)); transform: translateY(-1px); }
+    a:active { transform: translateY(0); }
+
+    hr {
+      border: 0;
+      border-top: 1px solid color-mix(in srgb, var(--apple-border) 100%, transparent);
+      margin: 22px 0;
+    }
+
+    img {
+      max-width: 100%;
+      height: auto;
+      display: block;
+      margin: 18px auto;
+      border-radius: var(--radius-sm);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity 0.35s var(--ease), transform 0.35s var(--ease);
+    }
+
+    img.is-ready {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    blockquote {
+      margin: 16px 0;
+      padding: 12px 14px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--apple-border);
+      border-left: 3px solid color-mix(in srgb, var(--apple-border) 70%, var(--apple-accent));
+      background: color-mix(in srgb, var(--apple-surface-2) 88%, transparent);
+      color: color-mix(in srgb, var(--apple-text) 66%, var(--apple-muted));
+    }
+
+    blockquote > p { margin: 8px 0; }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      padding: 2px 6px;
+      border-radius: 6px;
+      border: 1px solid var(--apple-border);
+      background: color-mix(in srgb, var(--apple-bg) 65%, var(--apple-surface-2));
+      color: var(--apple-accent);
+      font-size: 0.92em;
+    }
+
+    pre {
+      margin: 16px 0;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--apple-border);
+      background: color-mix(in srgb, var(--apple-bg) 70%, var(--apple-surface-2));
+      box-shadow: var(--shadow-1);
+      overflow: auto;
+    }
+
+    pre code {
+      display: block;
+      padding: 14px 12px;
+      margin: 0;
+      background: transparent;
+      border: 0;
+      color: var(--apple-text);
+      line-height: 1.7;
+      font-size: 0.92em;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      border: 1px solid var(--table-border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--table-bg);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      box-shadow: 0 10px 28px rgba(17, 24, 39, 0.06);
+      margin: 16px 0;
+    }
+
+    thead {
+      background: var(--table-header-bg);
+      color: var(--apple-text);
+      text-align: left;
+    }
+
+    th, td {
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--table-divider);
+      vertical-align: middle;
+      line-height: 1.45;
+      font-variant-numeric: tabular-nums;
+    }
+
+    th {
+      font-weight: 650;
+      color: color-mix(in srgb, var(--apple-text) 92%, transparent);
+    }
+
+    tbody tr:last-child td { border-bottom: 0; }
+
+    table.favour-table {
+      table-layout: fixed;
+    }
+
+    table.favour-table thead th { background: inherit; }
+
+    table.favour-table--4 th:nth-child(1),
+    table.favour-table--4 td:nth-child(1) {
+      text-align: left;
+      width: 52%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    table.favour-table--4 th:nth-child(2),
+    table.favour-table--4 td:nth-child(2) {
+      text-align: left;
+      width: 16%;
+    }
+
+    table.favour-table--4 th:nth-child(3),
+    table.favour-table--4 td:nth-child(3),
+    table.favour-table--4 th:nth-child(4),
+    table.favour-table--4 td:nth-child(4) {
+      text-align: center;
+      width: 16%;
+    }
+
+    table.favour-table--5 th:nth-child(1),
+    table.favour-table--5 td:nth-child(1) {
+      text-align: left;
+      width: 34%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    table.favour-table--5 th:nth-child(2),
+    table.favour-table--5 td:nth-child(2) {
+      text-align: left;
+      width: 26%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    table.favour-table--5 th:nth-child(3),
+    table.favour-table--5 td:nth-child(3) {
+      text-align: left;
+      width: 14%;
+    }
+
+    table.favour-table--5 th:nth-child(4),
+    table.favour-table--5 td:nth-child(4),
+    table.favour-table--5 th:nth-child(5),
+    table.favour-table--5 td:nth-child(5) {
+      text-align: center;
+      width: 13%;
+    }
+
+    table.favour-table--6 th:nth-child(3),
+    table.favour-table--6 td:nth-child(3) {
+      text-align: left;
+      width: 14%;
+    }
+
+    .cell-ellipsis {
+      display: block;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--pill-gray-border);
+      background: var(--pill-gray-bg);
+      box-shadow: 0 1px 0 rgba(17, 24, 39, 0.04);
+      font-weight: 650;
+      font-size: 0.95em;
+      line-height: 1.2;
+      letter-spacing: -0.01em;
+      white-space: nowrap;
+    }
+
+    .badge--pos {
+      color: color-mix(in srgb, var(--apple-success) 92%, #0B3D1A);
+      border-color: color-mix(in srgb, var(--apple-success) 55%, var(--pill-gray-border));
+      background: color-mix(in srgb, var(--apple-success) 16%, var(--table-bg));
+    }
+
+    .badge--neg {
+      color: color-mix(in srgb, var(--apple-danger) 92%, #5B0F0F);
+      border-color: color-mix(in srgb, var(--apple-danger) 55%, var(--pill-gray-border));
+      background: color-mix(in srgb, var(--apple-danger) 16%, var(--table-bg));
+    }
+
+    .badge--zero {
+      color: var(--pill-gray-text);
+      border-color: var(--pill-gray-border);
+      background: var(--pill-gray-bg);
+      font-weight: 650;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--pill-gray-border);
+      background: var(--pill-gray-bg);
+      color: var(--pill-gray-text);
+      font-weight: 650;
+      font-size: 0.9em;
+      line-height: 1.2;
+      white-space: nowrap;
+      min-width: 40px;
+      text-align: center;
+    }
+
+    .tag--muted {
+      color: var(--pill-gray-text);
+      background: var(--pill-gray-bg);
+    }
+
+    .status--yes {
+      color: var(--apple-success);
+      border-color: color-mix(in srgb, var(--apple-success) 55%, var(--pill-gray-border));
+      background: color-mix(in srgb, var(--apple-success) 14%, var(--table-bg));
+      font-weight: 650;
+    }
+
+    .status--no {
+      color: var(--pill-gray-text);
+      background: var(--pill-gray-bg);
+    }
+
+    ul, ol {
+      padding-left: 1.25em;
+      margin: 12px 0;
+      color: var(--apple-text);
+    }
+
+    li { margin: 6px 0; }
+    ::marker { color: color-mix(in srgb, var(--apple-muted) 100%, transparent); }
+
+    details {
+      border: 1px solid var(--apple-border);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      background: color-mix(in srgb, var(--apple-surface-2) 85%, transparent);
+      box-shadow: var(--shadow-1);
+      margin: 14px 0;
+    }
+
+    details > summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: var(--apple-text);
+      list-style: none;
+    }
+
+    details > summary::-webkit-details-marker { display: none; }
+
+    .katex-display {
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: 6px 0;
+    }
+
+    @media (max-width: 720px) {
+      .topbar-inner { padding: 12px 14px; }
+      .page { padding: 16px 14px 48px; }
+      #content { padding: 16px; border-radius: 10px; }
+      h1 { font-size: 1.55em; }
+      h2 { font-size: 1.30em; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #content, img, a, .version { transition: none; }
+      #content { transform: none; }
+    }
+
+    .favour-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+    }
+
+    .favour-bar__value {
+      flex: 0 0 40px;
+      text-align: right;
+      font-weight: 650;
+    }
+
+    .favour-bar__progress {
+      flex: 1;
+      height: 8px;
+      border-radius: 4px;
+      background: var(--pill-gray-bg);
+      overflow: hidden;
+    }
+
+    .favour-bar__fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.3s ease, background-color 0.3s ease;
+    }
+
+    .favour-bar__fill--negative {
+      background-color: #F44336;
+    }
+
+    .favour-bar__fill--neutral {
+      background-color: #9E9E9E;
+    }
+
+    .favour-bar__fill--blue {
+      background-color: #2196F3;
+    }
+
+    .favour-bar__fill--orange {
+      background-color: #FF9800;
+    }
+
+    .favour-bar__fill--purple {
+      background-color: #9C27B0;
+    }
+
+    .favour-bar__fill--rainbow {
+      background: linear-gradient(90deg, #C7E5F5, #D7E8D2, #F9E7B8, #F7C8B8, #F9D2A8, #E8D4E2, #C7E5F5);
+      background-size: 600% 100%;
+      animation: rainbow 3s ease infinite;
+    }
+
+    @keyframes rainbow {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+  </style>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/common.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js" integrity="sha384-hIoBPJpTUs74ddyc4bFZSM1TVlQDA60VBbJS0oA934VSz82sBx1X7kSx2ATBDIyd" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js" integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous"></script>
+</head>
+
+<body>
+  <div class="app">
+    <header class="topbar" aria-label="AstrBot topbar">
+      <div class="topbar-inner">
+        <div class="brand">
+          <h1 class="brand-title">AstrBot</h1>
+          <span class="version" aria-label="version">预览版</span>
+        </div>
+
+        <div class="spark" aria-label="status sparkline">
+          <svg viewBox="0 0 120 26" role="img" aria-label="sparkline">
+            <defs>
+              <linearGradient id="sparkG" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0" stop-color="var(--apple-accent)" stop-opacity="0.85" />
+                <stop offset="1" stop-color="color-mix(in srgb, var(--apple-accent) 50%, #BB86FC)" stop-opacity="0.85" />
+              </linearGradient>
+            </defs>
+            <path d="M2 16 C10 9, 18 20, 28 14 S48 10, 58 15 S78 20, 88 12 S108 8, 118 14" fill="none" stroke="url(#sparkG)" stroke-width="2.25" stroke-linecap="round" />
+            <path d="M2 16 C10 9, 18 20, 28 14 S48 10, 58 15 S78 20, 88 12 S108 8, 118 14 L118 26 L2 26 Z" fill="url(#sparkG)" opacity="0.10" />
+          </svg>
+        </div>
+      </div>
+    </header>
+
+    <main class="page" aria-label="page">
+      <article id="content" aria-label="Markdown content">
+        <h1>📊 好感度系统预览</h1>
+        <p>以下是好感度系统的预览表格，展示了不同关系等级和好感度值的视觉效果：</p>
+        
+        <h2>6列完整表格（包含互动次数和印象）</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>用户ID</th>
+              <th>用户昵称</th>
+              <th>好感度</th>
+              <th>关系</th>
+              <th>累计互动次数</th>
+              <th>印象</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1001</td>
+              <td>测试用户1</td>
+              <td>-100</td>
+              <td>极度厌恶</td>
+              <td>5</td>
+              <td>负面印象</td>
+            </tr>
+            <tr>
+              <td>1002</td>
+              <td>测试用户2</td>
+              <td>-60</td>
+              <td>反感</td>
+              <td>10</td>
+              <td>负面印象</td>
+            </tr>
+            <tr>
+              <td>1003</td>
+              <td>测试用户3</td>
+              <td>-20</td>
+              <td>疏远</td>
+              <td>15</td>
+              <td>冷淡印象</td>
+            </tr>
+            <tr>
+              <td>1004</td>
+              <td>测试用户4</td>
+              <td>5</td>
+              <td>普通</td>
+              <td>20</td>
+              <td>初始印象</td>
+            </tr>
+            <tr>
+              <td>1005</td>
+              <td>测试用户5</td>
+              <td>25</td>
+              <td>熟悉</td>
+              <td>25</td>
+              <td>友好的用户</td>
+            </tr>
+            <tr>
+              <td>1006</td>
+              <td>测试用户6</td>
+              <td>45</td>
+              <td>在意</td>
+              <td>35</td>
+              <td>经常互动的用户</td>
+            </tr>
+            <tr>
+              <td>1007</td>
+              <td>测试用户7</td>
+              <td>65</td>
+              <td>亲密</td>
+              <td>50</td>
+              <td>熟悉的朋友</td>
+            </tr>
+            <tr>
+              <td>1008</td>
+              <td>测试用户8</td>
+              <td>85</td>
+              <td>宿命回响</td>
+              <td>80</td>
+              <td>亲密的朋友</td>
+            </tr>
+            <tr>
+              <td>1009</td>
+              <td>测试用户9</td>
+              <td>100</td>
+              <td>宿命回响</td>
+              <td>200</td>
+              <td>最好的朋友</td>
+            </tr>
+          </tbody>
+        </table>
+        
+        <h2>5列表格（包含用户昵称）</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>用户昵称</th>
+              <th>用户ID</th>
+              <th>好感度</th>
+              <th>关系</th>
+              <th>唯一</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>用户A</td>
+              <td>2001</td>
+              <td>-45</td>
+              <td>冷淡</td>
+              <td>是</td>
+            </tr>
+            <tr>
+              <td>用户B</td>
+              <td>2002</td>
+              <td>15</td>
+              <td>普通</td>
+              <td>否</td>
+            </tr>
+            <tr>
+              <td>用户C</td>
+              <td>2003</td>
+              <td>45</td>
+              <td>在意</td>
+              <td>是</td>
+            </tr>
+            <tr>
+              <td>用户D</td>
+              <td>2004</td>
+              <td>75</td>
+              <td>亲密</td>
+              <td>是</td>
+            </tr>
+            <tr>
+              <td>用户E</td>
+              <td>2005</td>
+              <td>100</td>
+              <td>宿命回响</td>
+              <td>是</td>
+            </tr>
+          </tbody>
+        </table>
+        
+        <h2>4列表格</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>用户ID</th>
+              <th>好感度</th>
+              <th>关系</th>
+              <th>唯一</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>3001</td>
+              <td>-80</td>
+              <td>厌恶</td>
+              <td>否</td>
+            </tr>
+            <tr>
+              <td>3002</td>
+              <td>0</td>
+              <td>普通</td>
+              <td>否</td>
+            </tr>
+            <tr>
+              <td>3003</td>
+              <td>20</td>
+              <td>熟悉</td>
+              <td>是</td>
+            </tr>
+            <tr>
+              <td>3004</td>
+              <td>45</td>
+              <td>在意</td>
+              <td>否</td>
+            </tr>
+            <tr>
+              <td>3005</td>
+              <td>60</td>
+              <td>亲密</td>
+              <td>是</td>
+            </tr>
+            <tr>
+              <td>3006</td>
+              <td>100</td>
+              <td>宿命回响</td>
+              <td>是</td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+    </main>
+  </div>
+
+  <script>
+    window.addEventListener("DOMContentLoaded", function () {
+      var contentEl = document.getElementById("content");
+      if (!contentEl) return;
+
+      function normalizeHeader(text) {
+        return String(text || "").replace(/\s+/g, "").trim();
+      }
+
+      function createSpan(className, text) {
+        var el = document.createElement("span");
+        el.className = className;
+        el.textContent = text;
+        return el;
+      }
+
+      function createChartIcon() {
+        var wrap = document.createElement("span");
+        wrap.className = "hicon";
+        wrap.setAttribute("aria-hidden", "true");
+
+        var svgNS = "http://www.w3.org/2000/svg";
+        var svg = document.createElementNS(svgNS, "svg");
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("fill", "none");
+
+        var bars = document.createElementNS(svgNS, "path");
+        bars.setAttribute("d", "M6 15.5V10.5C6 9.95 5.55 9.5 5 9.5C4.45 9.5 4 9.95 4 10.5V16.5C4 17.6 4.9 18.5 6 18.5H19C19.55 18.5 20 18.05 20 17.5C20 16.95 19.55 16.5 19 16.5H6.9C6.4 16.5 6 16.1 6 15.5ZM10 16.5V7.5C10 6.95 9.55 6.5 9 6.5C8.45 6.5 8 6.95 8 7.5V16.5H10ZM14 16.5V11.5C14 10.95 13.55 10.5 13 10.5C12.45 10.5 12 10.95 12 11.5V16.5H14ZM18 16.5V9.5C18 8.95 17.55 8.5 17 8.5C16.45 8.5 16 8.95 16 9.5V16.5H18Z");
+        bars.setAttribute("fill", "currentColor");
+        bars.setAttribute("opacity", "0.92");
+
+        svg.appendChild(bars);
+        wrap.appendChild(svg);
+        return wrap;
+      }
+
+      function createHeartIcon() {
+        var wrap = document.createElement("span");
+        wrap.className = "hicon-heart";
+        wrap.setAttribute("aria-hidden", "true");
+
+        var uid = "g" + Math.random().toString(36).slice(2, 9);
+        var svgNS = "http://www.w3.org/2000/svg";
+        var svg = document.createElementNS(svgNS, "svg");
+        svg.setAttribute("viewBox", "0 0 64 64");
+        svg.setAttribute("fill", "none");
+
+        var defs = document.createElementNS(svgNS, "defs");
+        var grad = document.createElementNS(svgNS, "linearGradient");
+        grad.setAttribute("id", uid);
+        grad.setAttribute("x1", "16");
+        grad.setAttribute("y1", "12");
+        grad.setAttribute("x2", "48");
+        grad.setAttribute("y2", "52");
+
+        var s1 = document.createElementNS(svgNS, "stop");
+        s1.setAttribute("offset", "0");
+        s1.setAttribute("stop-color", "#FF8FA3");
+
+        var s2 = document.createElementNS(svgNS, "stop");
+        s2.setAttribute("offset", "1");
+        s2.setAttribute("stop-color", "#FF2D55");
+
+        grad.appendChild(s1);
+        grad.appendChild(s2);
+        defs.appendChild(grad);
+        svg.appendChild(defs);
+
+        var heart = document.createElementNS(svgNS, "path");
+        heart.setAttribute(
+          "d",
+          "M32 54C32 54 12.5 41.3 12.5 26.4C12.5 18.1 18.5 13 25.6 13C28.9 13 31.1 14.4 32 15.6C32.9 14.4 35.1 13 38.4 13C45.5 13 51.5 18.1 51.5 26.4C51.5 41.3 32 54 32 54Z"
+        );
+        heart.setAttribute("stroke", "url(#" + uid + ")");
+        heart.setAttribute("stroke-width", "6");
+        heart.setAttribute("stroke-linecap", "round");
+        heart.setAttribute("stroke-linejoin", "round");
+
+        var pulse = document.createElementNS(svgNS, "path");
+        pulse.setAttribute("d", "M19 33H27.5L30.3 27.2L33.2 38.2L37.2 29.6H45");
+        pulse.setAttribute("stroke", "url(#" + uid + ")");
+        pulse.setAttribute("stroke-width", "6");
+        pulse.setAttribute("stroke-linecap", "round");
+        pulse.setAttribute("stroke-linejoin", "round");
+
+        svg.appendChild(heart);
+        svg.appendChild(pulse);
+        wrap.appendChild(svg);
+        return wrap;
+      }
+
+      function upgradeHeadingIcons(root) {
+        var headings = root.querySelectorAll("h1, h2");
+        headings.forEach(function (h) {
+          var raw = String(h.textContent || "");
+          var trimmed = raw.trim();
+          if (!trimmed) return;
+          if (!/^📊\s*/.test(trimmed)) return;
+          var rest = trimmed.replace(/^📊\s*/, "");
+
+          var mainText = rest;
+          var metaText = "";
+          var m = rest.match(/^(.*?)(?:\s*-\s*第\s*(\d+\/\d+)\s*页)?$/);
+          if (m) {
+            mainText = (m[1] || "").trim();
+            if (m[2]) {
+              metaText = "第 " + m[2] + " 页";
+            }
+          }
+
+          h.textContent = "";
+          h.classList.add("has-icon");
+          var iconEl = /好感度/.test(rest) ? createHeartIcon() : createChartIcon();
+          h.appendChild(iconEl);
+          var mainEl = document.createElement("span");
+          mainEl.className = "title-main";
+          mainEl.textContent = mainText || rest;
+          h.appendChild(mainEl);
+
+          if (metaText) {
+            var metaEl = document.createElement("span");
+            metaEl.className = "title-meta";
+            metaEl.textContent = metaText;
+            h.appendChild(metaEl);
+          }
+        });
+      }
+
+      function formatScore(value) {
+        if (typeof value !== "number" || !isFinite(value)) return "";
+        if (value < 0) return "−" + String(Math.abs(value));
+        return String(value);
+      }
+
+      function enhanceFavourTable(table, columns) {
+        var rows = table.querySelectorAll("tbody tr");
+        rows.forEach(function (row) {
+          var tds = row.querySelectorAll("td");
+          if (!tds) return;
+
+          var nicknameIdx = columns && typeof columns.nickname === "number" ? columns.nickname : null;
+          var userIdIdx = columns && typeof columns.userId === "number" ? columns.userId : null;
+          var scoreIdx = columns && typeof columns.score === "number" ? columns.score : null;
+          var relationIdx = columns && typeof columns.relation === "number" ? columns.relation : null;
+          var uniqueIdx = columns && typeof columns.unique === "number" ? columns.unique : null;
+          var interactCountIdx = columns && typeof columns.interactCount === "number" ? columns.interactCount : null;
+          var todayChangeIdx = columns && typeof columns.todayChange === "number" ? columns.todayChange : null;
+          var impressionIdx = columns && typeof columns.impression === "number" ? columns.impression : null;
+          
+          // 存储当前行的分数值，用于关系颜色设置
+          var currentScore = null;
+
+          if (nicknameIdx !== null && tds[nicknameIdx]) {
+            var nicknameCell = tds[nicknameIdx];
+            var nicknameText = String(nicknameCell.textContent || "").trim();
+            if (nicknameText) {
+              nicknameCell.textContent = "";
+              nicknameCell.appendChild(createSpan("cell-ellipsis", nicknameText));
+            }
+          }
+
+          if (userIdIdx !== null && tds[userIdIdx]) {
+            var userIdCell = tds[userIdIdx];
+            var userIdText = String(userIdCell.textContent || "").trim();
+            if (userIdText) {
+              userIdCell.textContent = "";
+              userIdCell.appendChild(createSpan("cell-ellipsis", userIdText));
+            }
+          }
+
+          if (scoreIdx !== null && tds[scoreIdx]) {
+            var scoreCell = tds[scoreIdx];
+            var rawScore = String(scoreCell.textContent || "").trim();
+            var score = Number(rawScore);
+            // 存储分数值用于关系颜色设置
+            currentScore = score;
+            if (isFinite(score)) {
+              scoreCell.textContent = "";
+              
+              // 创建好感度进度条
+              var barContainer = document.createElement("div");
+              barContainer.className = "favour-bar";
+              
+              // 数值部分
+              var valueSpan = document.createElement("span");
+              valueSpan.className = "favour-bar__value tag";
+              
+              // 根据好感度值设置颜色
+              if (score < 0) {
+                valueSpan.className += " badge--neg";
+              } else if (score >= 0 && score <= 19) {
+                valueSpan.className += " tag--muted";
+              } else if (score >= 20 && score <= 59) {
+                valueSpan.style.backgroundColor = "#E3F2FD";
+                valueSpan.style.borderColor = "#90CAF9";
+                valueSpan.style.color = "#1976D2";
+              } else if (score >= 60 && score <= 99) {
+                valueSpan.style.backgroundColor = "#FFF3E0";
+                valueSpan.style.borderColor = "#FFCC80";
+                valueSpan.style.color = "#E65100";
+              } else if (score === 100) {
+                valueSpan.style.background = "linear-gradient(90deg, #C7E5F5, #D7E8D2, #F9E7B8, #F7C8B8, #F9D2A8, #E8D4E2, #C7E5F5)";
+                valueSpan.style.backgroundSize = "600% 100%";
+                valueSpan.style.animation = "rainbow 3s ease infinite";
+                valueSpan.style.color = "#333";
+                valueSpan.style.borderColor = "#E0E0E0";
+              }
+              
+              valueSpan.textContent = formatScore(score);
+              barContainer.appendChild(valueSpan);
+              
+              // 进度条部分
+              var progressContainer = document.createElement("div");
+              progressContainer.className = "favour-bar__progress";
+              
+              var fill = document.createElement("div");
+              fill.className = "favour-bar__fill";
+              
+              // 根据好感度值设置颜色和宽度
+              var width = Math.abs(score);
+              if (width > 100) width = 100;
+              
+              if (score < 0) {
+                fill.className += " favour-bar__fill--negative";
+              } else if (score >= 0 && score <= 19) {
+                fill.className += " favour-bar__fill--neutral";
+              } else if (score >= 20 && score <= 59) {
+                fill.className += " favour-bar__fill--blue";
+              } else if (score >= 60 && score <= 99) {
+                fill.className += " favour-bar__fill--orange";
+              } else if (score === 100) {
+                fill.className += " favour-bar__fill--rainbow";
+              }
+              
+              fill.style.width = width + "%";
+              progressContainer.appendChild(fill);
+              barContainer.appendChild(progressContainer);
+              
+              scoreCell.appendChild(barContainer);
+            }
+          }
+
+          if (relationIdx !== null && tds[relationIdx]) {
+            var relationCell = tds[relationIdx];
+            var relationText = String(relationCell.textContent || "").trim();
+            if (relationText) {
+              var relationSpan = createSpan("tag", relationText);
+              
+              // 根据好感度值设置颜色（与进度条保持一致）
+              // 负数：使用红色
+              // 0-19：使用灰色
+              // 20-59：使用蓝色
+              // 60-99：使用橙色
+              // 100（宿命回响）：使用彩虹渐变
+              if (relationText === "无") {
+                relationSpan.className += " tag--muted";
+              } else if (currentScore !== null && currentScore < 0) {
+                // 负数好感度使用红色
+                relationSpan.style.backgroundColor = "#FFEBEE";
+                relationSpan.style.borderColor = "#FFCDD2";
+                relationSpan.style.color = "#C62828";
+              } else if (currentScore !== null && currentScore >= 0 && currentScore <= 19) {
+                // 0-19好感度使用灰色
+                relationSpan.className += " tag--muted";
+              } else if (currentScore !== null && currentScore >= 20 && currentScore <= 59) {
+                // 20-59好感度使用蓝色
+                relationSpan.style.backgroundColor = "#E3F2FD";
+                relationSpan.style.borderColor = "#90CAF9";
+                relationSpan.style.color = "#1976D2";
+              } else if (currentScore !== null && currentScore >= 60 && currentScore <= 99) {
+                // 60-99好感度使用橙色
+                relationSpan.style.backgroundColor = "#FFF3E0";
+                relationSpan.style.borderColor = "#FFCC80";
+                relationSpan.style.color = "#E65100";
+              } else if (currentScore === 100) {
+                // 100好感度（宿命回响）使用彩虹渐变
+                relationSpan.style.background = "linear-gradient(90deg, #C7E5F5, #D7E8D2, #F9E7B8, #F7C8B8, #F9D2A8, #E8D4E2, #C7E5F5)";
+                relationSpan.style.backgroundSize = "600% 100%";
+                relationSpan.style.animation = "rainbow 3s ease infinite";
+                relationSpan.style.color = "#333";
+                relationSpan.style.borderColor = "#E0E0E0";
+              }
+              
+              relationCell.textContent = "";
+              relationCell.appendChild(relationSpan);
+            }
+          }
+
+          if (uniqueIdx !== null && tds[uniqueIdx]) {
+            var uniqueCell = tds[uniqueIdx];
+            var uniqueText = String(uniqueCell.textContent || "").trim();
+            if (uniqueText) {
+              var normalized = uniqueText.toLowerCase();
+              var isYes = uniqueText === "是" || normalized === "true" || normalized === "yes" || normalized === "y" || normalized === "1";
+              var statusClass = isYes ? "tag status--yes" : "tag status--no";
+              var showText = isYes ? "是" : "否";
+              uniqueCell.textContent = "";
+              uniqueCell.appendChild(createSpan(statusClass, showText));
+            }
+          }
+
+          if (interactCountIdx !== null && tds[interactCountIdx]) {
+            var interactCountCell = tds[interactCountIdx];
+            var interactCountText = String(interactCountCell.textContent || "").trim();
+            if (interactCountText) {
+              interactCountCell.textContent = "";
+              interactCountCell.appendChild(createSpan("cell-ellipsis", interactCountText));
+            }
+          }
+
+          if (todayChangeIdx !== null && tds[todayChangeIdx]) {
+            var todayChangeCell = tds[todayChangeIdx];
+            var todayChangeText = String(todayChangeCell.textContent || "").trim();
+            if (todayChangeText) {
+              var todayChange = Number(todayChangeText);
+              var badgeClass = "badge";
+              if (todayChange > 0) {
+                badgeClass += " badge--pos";
+              } else if (todayChange < 0) {
+                badgeClass += " badge--neg";
+              } else {
+                badgeClass += " badge--zero";
+              }
+              todayChangeCell.textContent = "";
+              todayChangeCell.appendChild(createSpan(badgeClass, todayChangeText));
+            }
+          }
+
+          if (impressionIdx !== null && tds[impressionIdx]) {
+            var impressionCell = tds[impressionIdx];
+            var impressionText = String(impressionCell.textContent || "").trim();
+            if (impressionText) {
+              impressionCell.textContent = "";
+              impressionCell.appendChild(createSpan("cell-ellipsis", impressionText));
+            }
+          }
+        });
+      }
+
+      function tagFavourTables(root) {
+        var tables = root.querySelectorAll("table");
+        var expected4 = ["用户ID", "好感度", "关系", "唯一"];
+        var expected5 = ["用户昵称", "用户ID", "好感度", "关系", "唯一"];
+        var expected6 = ["用户ID", "用户昵称", "好感度", "关系", "累计互动次数", "印象"];
+        var expected5_favour_change = ["用户昵称", "好感度", "关系", "今日好感度变化", "印象"];
+        tables.forEach(function (table) {
+          var ths = Array.prototype.slice.call(table.querySelectorAll("thead th"));
+          if (ths.length === expected4.length) {
+            for (var i = 0; i < expected4.length; i++) {
+              if (normalizeHeader(ths[i].textContent) !== expected4[i]) return;
+            }
+            table.classList.add("favour-table", "favour-table--4");
+            enhanceFavourTable(table, { userId: 0, score: 1, relation: 2, unique: 3 });
+            return;
+          }
+
+          if (ths.length === expected5.length) {
+            // 检查是否是包含今日好感度变化的5列表格
+            var isFavourChangeTable = true;
+            for (var j = 0; j < expected5_favour_change.length; j++) {
+              if (normalizeHeader(ths[j].textContent) !== expected5_favour_change[j]) {
+                isFavourChangeTable = false;
+                break;
+              }
+            }
+            if (isFavourChangeTable) {
+              table.classList.add("favour-table", "favour-table--5");
+              enhanceFavourTable(table, { nickname: 0, score: 1, relation: 2, todayChange: 3, impression: 4 });
+              return;
+            }
+            // 检查是否是包含用户ID的5列表格
+            for (var j = 0; j < expected5.length; j++) {
+              if (normalizeHeader(ths[j].textContent) !== expected5[j]) return;
+            }
+            table.classList.add("favour-table", "favour-table--5");
+            enhanceFavourTable(table, { nickname: 0, userId: 1, score: 2, relation: 3, unique: 4 });
+            return;
+          }
+
+          if (ths.length === expected6.length) {
+            for (var k = 0; k < expected6.length; k++) {
+              if (normalizeHeader(ths[k].textContent) !== expected6[k]) return;
+            }
+            table.classList.add("favour-table", "favour-table--6");
+            enhanceFavourTable(table, { userId: 0, nickname: 1, score: 2, relation: 3, interactCount: 4, impression: 5 });
+          }
+        });
+      }
+
+      if (window.marked && window.marked.setOptions) {
+        window.marked.setOptions({
+          gfm: true,
+          breaks: false
+        });
+      }
+
+      // 直接处理HTML内容，不需要解析Markdown
+      upgradeHeadingIcons(contentEl);
+      tagFavourTables(contentEl);
+
+      if (window.hljs) {
+        window.hljs.highlightAll();
+      }
+
+      if (window.renderMathInElement) {
+        window.renderMathInElement(contentEl, {
+          delimiters: [
+            { left: "$$", right: "$$", display: true },
+            { left: "$", right: "$", display: false }
+          ]
+        });
+      }
+
+      requestAnimationFrame(function () {
+        contentEl.classList.add("is-ready");
+      });
+
+      var imgs = contentEl.querySelectorAll("img");
+      imgs.forEach(function (img) {
+        if (img.complete) {
+          img.classList.add("is-ready");
+          return;
+        }
+        img.addEventListener("load", function () {
+          img.classList.add("is-ready");
+        }, { once: true });
+        img.addEventListener("error", function () {
+          img.classList.add("is-ready");
+        }, { once: true });
+      });
+    });
+  </script>
+</body>
+</html>

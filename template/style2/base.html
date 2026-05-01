@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light" />
+  <meta name="theme-color" content="#f7f5fb" />
+  <title>AstrBot</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@500;600;700;900&display=swap" />
+  {{{ styles }}}
+</head>
+<body>
+  <main class="page" aria-label="Affection page">
+    <header class="hero">
+      <div>
+        <div class="eyebrow">Fia Affection Ledger</div>
+        <h1 class="hero-title" id="hero-title">{{ title }}</h1>
+        {% if show_page_text %}
+        <div class="hero-page" id="hero-page">{{ page_text }}</div>
+        {% endif %}
+      </div>
+    </header>
+
+    <section class="panel" aria-label="Affection panel">
+      <span class="corner" aria-hidden="true"></span>
+      <span class="corner right" aria-hidden="true"></span>
+      {{{ favour_table }}}
+    </section>
+
+  </main>
+</body>
+</html>
