@@ -181,14 +181,20 @@ class FavourManagerTool(Star):
     async def _register_favour_reset_task(self):
         """注册好感度回归定时任务"""
         try:
+            task_name = "favour_reset_weekly"
             time_parts = self.favour_reset_time.split(":")
             hour = int(time_parts[0]) if len(time_parts) > 0 else 23
             minute = int(time_parts[1]) if len(time_parts) > 1 else 59
 
             cron_expr = f"{minute} {hour} * * {self.favour_reset_day}"
 
+            existing_jobs = await self.context.cron_manager.list_jobs(job_type="basic")
+            for job in existing_jobs:
+                if job.name == task_name:
+                    await self.context.cron_manager.delete_job(job.job_id)
+
             await self.context.cron_manager.add_basic_job(
-                name="favour_reset_weekly",
+                name=task_name,
                 cron_expression=cron_expr,
                 handler=self._favour_reset_task,
                 description="每周定时重置负好感度为0",
