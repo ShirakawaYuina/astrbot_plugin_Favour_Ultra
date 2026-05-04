@@ -19,6 +19,7 @@ from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
 )
 from astrbot.core.utils.session_waiter import SessionController, session_waiter
 
+from .image_sender import FavourImageSender
 from .permissions import PermissionManager, PermLevel
 from .storage import FavourDBManager, FavourRecord
 from .utils import is_valid_userid
@@ -138,6 +139,11 @@ class FavourManagerTool(Star):
         self.enable_favour_reset = reset_conf.get("enable_favour_reset", True)
         self.favour_reset_day = reset_conf.get("favour_reset_day", 0)
         self.favour_reset_time = reset_conf.get("favour_reset_time", "23:59:59")
+
+        self.image_sender = FavourImageSender(
+            send_mode=self.config.get("image_send_mode", "base64"),
+            url_base=self.config.get("image_send_url_base", ""),
+        )
 
         self._validate_config()
 
@@ -769,7 +775,7 @@ class FavourManagerTool(Star):
                         "device_scale_factor_level": "high",
                     },
                 )
-                await event.send(event.image_result(image_data))
+                await self.image_sender.send_image(event, image_data)
             except Exception as e:
                 logger.error(f"生成图片失败 (Page {i + 1}): {e}")
                 await event.send(event.plain_result("生成图片失败，请检查日志。"))

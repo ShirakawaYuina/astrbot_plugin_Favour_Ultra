@@ -62,6 +62,19 @@
         "options": ["default", "style2"],
         "hint": "选择生成好感度图片时使用的模板。"
     },
+    "image_send_mode": {
+        "description": "图片发送模式",
+        "type": "string",
+        "default": "base64",
+        "options": ["base64", "url"],
+        "hint": "base64 保持原有事件图片发送方式；url 会通过 AstrBot 文件服务生成 HTTP 图片链接，并直接通过 OneBot 发送，适合 aiocqhttp。"
+    },
+    "image_send_url_base": {
+        "description": "图片 URL 发送基础地址",
+        "type": "string",
+        "default": "",
+        "hint": "仅 image_send_mode=url 时生效。留空时使用 AstrBot 全局 callback_api_base；如果 NapCat 和 AstrBot 不在同一容器，请填写 NapCat 可访问的 AstrBot 地址，例如 http://astrbot:6185。"
+    },
     "advanced_config": {
         "description": "高级配置",
         "type": "object",
