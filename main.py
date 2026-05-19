@@ -310,7 +310,25 @@ class FavourManagerTool(Star):
         if next_round_count % self.impression_natural_rounds != 0:
             return
 
-        await self._refresh_user_impression_from_dialogue(user_id, session_id)
+        self._schedule_impression_refresh(user_id, session_id)
+
+    def _schedule_impression_refresh(self, user_id: str, session_id: str) -> None:
+        """后台刷新用户印象，避免额外 LLM 调用阻塞用户消息回复链路。"""
+        lock_key = (user_id, session_id)
+        if lock_key in self.impression_refresh_locks:
+            return
+
+        task = asyncio.create_task(
+            self._refresh_user_impression_from_dialogue(user_id, session_id)
+        )
+        task.add_done_callback(self._log_impression_refresh_task_result)
+
+    def _log_impression_refresh_task_result(self, task: asyncio.Task) -> None:
+        """显式记录后台任务异常，避免异步任务失败后只留下难以定位的事件循环告警。"""
+        try:
+            task.result()
+        except Exception as e:
+            logger.error(f"Impression refresh task failed: {e}")
 
     async def _refresh_user_impression_from_dialogue(
         self, user_id: str, session_id: str
@@ -349,17 +367,14 @@ class FavourManagerTool(Star):
             if len(impression) > 10:
                 impression = impression[:10]
 
+            latest_record = await self.db_manager.get_favour(user_id, session_id)
             dialogue_round_count = self.pending_dialogue_round_updates.get(
                 (user_id, session_id),
-                record.dialogue_round_count if record else 0,
+                latest_record.dialogue_round_count if latest_record else 0,
             )
             await self.db_manager.update_favour(
                 user_id,
                 session_id,
-                favour=record.favour if record else current_favour,
-                relationship=record.relationship if record else current_relationship,
-                is_unique=record.is_unique if record else False,
-                interact_count=record.interact_count if record else 0,
                 dialogue_round_count=dialogue_round_count,
                 impression=impression,
             )
