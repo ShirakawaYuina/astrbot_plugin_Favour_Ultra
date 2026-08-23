@@ -128,9 +128,9 @@ class FavourManagerTool(Star):
             "max_daily_favour_increase", 20
         )  # 每日最高可提升好感度，从配置读取
 
-        self.user_dialogue_messages: dict[str, list[tuple[str, str]]] = {}
-        self.dialogue_last_speaker: dict[str, str] = {}
-        self.dialogue_last_message: dict[str, str] = {}
+        # 印象样本按“用户 + 会话”保存完整的一问一答，避免不同群聊串线，
+        # 也避免相邻消息滑窗把同一句话重复写入多个样本。
+        self.user_dialogue_rounds: dict[tuple[str, str], list[tuple[str, str]]] = {}
         self.pending_dialogue_round_updates: dict[tuple[str, str], int] = {}
         self.impression_refresh_locks: set[tuple[str, str]] = set()
 
@@ -242,20 +242,69 @@ class FavourManagerTool(Star):
             return False
         return True
 
-    def _append_user_dialogue_message(
-        self, user_id: str, speaker_id: str, message: str
-    ) -> None:
-        history = self.user_dialogue_messages.setdefault(user_id, [])
-        history.append((speaker_id, message.strip()))
-        max_len = max(2, self.impression_natural_rounds * 2)
-        if len(history) > max_len:
-            del history[:-max_len]
+    def _is_favour_session_enabled(self, session_id: str | None) -> bool:
+        """判断当前好感度会话是否允许处理和采集对话。"""
 
-    def _get_recent_natural_dialogue_text(self, user_id: str) -> str:
-        history = self.user_dialogue_messages.get(user_id, [])
-        if not history:
+        if not session_id:
+            return False
+        if session_id == "global":
+            return True
+        if self.allowed_sessions and session_id not in self.allowed_sessions:
+            return False
+        return session_id not in self.blocked_sessions
+
+    def _append_user_dialogue_round(
+        self,
+        user_id: str,
+        session_id: str,
+        user_message: str,
+        bot_message: str,
+    ) -> None:
+        """追加一个已完成的用户—机器人对话轮次。
+
+        缓存键包含会话 ID；全局好感度模式下 session_id 本身为 ``global``，
+        非全局模式则天然隔离各群聊与私聊。
+        """
+
+        cache_key = (user_id, session_id)
+        dialogue_rounds = self.user_dialogue_rounds.setdefault(cache_key, [])
+        dialogue_rounds.append((user_message.strip(), bot_message.strip()))
+        max_rounds = max(1, self.impression_natural_rounds)
+        if len(dialogue_rounds) > max_rounds:
+            del dialogue_rounds[:-max_rounds]
+
+    def _get_recent_natural_dialogue_text(self, user_id: str, session_id: str) -> str:
+        """将完整轮次格式化为角色明确的印象生成证据。"""
+
+        dialogue_rounds = self.user_dialogue_rounds.get((user_id, session_id), [])
+        if not dialogue_rounds:
             return "None"
-        return "\n".join([f"- {speaker_id}: {text}" for speaker_id, text in history])
+        formatted_rounds = []
+        for round_index, (user_message, bot_message) in enumerate(
+            dialogue_rounds, start=1
+        ):
+            formatted_rounds.append(
+                f"第{round_index}轮\n"
+                f"- 目标用户: {user_message}\n"
+                f"- 机器人: {bot_message}"
+            )
+        return "\n".join(formatted_rounds)
+
+    @staticmethod
+    def _build_impression_prompt(user_id: str, dialogue_text: str) -> str:
+        """构造证据约束明确的用户印象生成提示词。"""
+
+        return (
+            "请根据以下完整的用户—机器人自然对话轮次，为目标用户生成一句不超过10个汉字的印象。"
+            "只分析“目标用户”的发言和行为，机器人发言仅用于理解语境，不能算作用户行为证据。"
+            "选择在多轮对话中稳定出现、最有区分度且能被原文直接支持的互动特点。"
+            "可以幽默、有梗，但不要为了抽象效果臆造特点，也不要根据单次行为下结论。"
+            "只有目标用户在至少3轮中独立发送实质相同或高度近似的内容时，才允许使用复读、重复、回声等印象；"
+            "机器人复述、引用或延续话题，以及同一轮中的相似措辞，都不属于用户复读证据。"
+            "不要输出解释、引号、前缀或其他内容，只输出印象文本本身。\n\n"
+            f"目标用户ID: {user_id}\n"
+            f"完整自然对话轮次:\n{dialogue_text}"
+        )
 
     def _extract_plain_text_from_result(self, event: AstrMessageEvent) -> str:
         try:
@@ -278,11 +327,6 @@ class FavourManagerTool(Star):
         except Exception:
             return ""
 
-    def _get_bot_speaker_id(self, event: AstrMessageEvent) -> str:
-        if hasattr(event, "message_obj") and hasattr(event.message_obj, "self_id"):
-            return str(event.message_obj.self_id)
-        return "bot"
-
     def _get_impression_provider(self):
         llm_provider = None
         try:
@@ -298,19 +342,41 @@ class FavourManagerTool(Star):
         return llm_provider
 
     async def _mark_dialogue_round_for_user(
-        self, user_id: str, session_id: str, message_pair: list[tuple[str, str]]
-    ) -> None:
-        record = await self.db_manager.get_favour(user_id, session_id)
-        next_round_count = (record.dialogue_round_count if record else 0) + 1
-        self.pending_dialogue_round_updates[(user_id, session_id)] = next_round_count
+        self,
+        user_id: str,
+        session_id: str,
+        user_message: str,
+        bot_message: str,
+    ) -> bool:
+        """记录完整轮次并返回本轮是否达到印象刷新阈值。"""
 
-        for speaker_id, text in message_pair:
-            self._append_user_dialogue_message(user_id, speaker_id, text)
+        record = await self.db_manager.get_favour(user_id, session_id)
+        round_key = (user_id, session_id)
+        stored_round_count = record.dialogue_round_count if record else 0
+        pending_round_count = self.pending_dialogue_round_updates.get(
+            round_key, stored_round_count
+        )
+        # 好感度控制标签偶尔解析失败时，数据库写入可能晚于印象采样；
+        # 必须从尚未落库的计数继续累加，避免真实完整轮次被下一次更新覆盖。
+        next_round_count = max(stored_round_count, pending_round_count) + 1
+        self.pending_dialogue_round_updates[round_key] = next_round_count
+
+        self._append_user_dialogue_round(
+            user_id,
+            session_id,
+            user_message,
+            bot_message,
+        )
 
         if next_round_count % self.impression_natural_rounds != 0:
-            return
+            return False
 
-        self._schedule_impression_refresh(user_id, session_id)
+        # 数据库计数会跨重启保留，但完整对话样本只存在于当前进程内存中。
+        # 若重启后恰好命中计数阈值，不能仅凭一两轮新样本仓促覆盖既有印象。
+        cached_round_count = len(
+            self.user_dialogue_rounds.get((user_id, session_id), [])
+        )
+        return cached_round_count >= self.impression_natural_rounds
 
     def _schedule_impression_refresh(self, user_id: str, session_id: str) -> None:
         """后台刷新用户印象，避免额外 LLM 调用阻塞用户消息回复链路。"""
@@ -339,23 +405,14 @@ class FavourManagerTool(Star):
 
         self.impression_refresh_locks.add(lock_key)
         try:
-            record = await self.db_manager.get_favour(user_id, session_id)
-            current_favour = record.favour if record else 0
-            current_relationship = record.relationship if record else ""
-            dialogue_text = self._get_recent_natural_dialogue_text(user_id)
+            dialogue_text = self._get_recent_natural_dialogue_text(user_id, session_id)
             provider = self._get_impression_provider()
             if not provider:
                 return
 
-            prompt = (
-                "请基于以下最近自然对话，为该用户生成一句不超过10个汉字的印象。"
-                "风格要幽默、搞笑、抽象一点，像群聊里会出现的外号或短标签。"
-                "不要太正经，不要写成长句，不要输出解释，不要参考命令，只输出印象文本本身。"
-                "尽量让人一看就觉得有梗、有点离谱、但又能对应这个人的互动特点。\n\n"
-                f"用户ID: {user_id}\n"
-                f"当前好感度: {current_favour}\n"
-                f"当前关系: {current_relationship or '无'}\n"
-                f"最近自然对话:\n{dialogue_text}"
+            prompt = self._build_impression_prompt(
+                user_id=user_id,
+                dialogue_text=dialogue_text,
             )
             response = await provider.text_chat(
                 contexts=[{"role": "user", "content": prompt}]
@@ -383,29 +440,33 @@ class FavourManagerTool(Star):
         finally:
             self.impression_refresh_locks.discard(lock_key)
 
-    async def _record_natural_dialogue_event(
-        self, event: AstrMessageEvent, speaker_id: str, message: str
-    ) -> None:
-        if not self._is_natural_dialogue_message(message):
-            return
+    async def _record_completed_dialogue_round(
+        self, event: AstrMessageEvent, bot_message: str
+    ) -> bool:
+        """消费当前事件暂存的用户输入，形成唯一的一问一答样本。"""
 
-        session_id = self._get_session_id(event)
-        if not session_id:
-            return
+        if not event.get_extra("_favour_llm_response_received", False):
+            return False
+        if event.get_extra("_favour_dialogue_round_recorded", False):
+            return False
+        user_id = str(event.get_extra("_favour_dialogue_user_id", "") or "")
+        session_id = str(event.get_extra("_favour_dialogue_session_id", "") or "")
+        user_message = str(
+            event.get_extra("_favour_dialogue_user_message", "") or ""
+        ).strip()
+        clean_bot_message = (bot_message or "").strip()
+        if not user_id or not session_id or not user_message or not clean_bot_message:
+            return False
 
-        last_speaker = self.dialogue_last_speaker.get(session_id)
-        last_message = self.dialogue_last_message.get(session_id)
-
-        self.dialogue_last_speaker[session_id] = speaker_id
-        self.dialogue_last_message[session_id] = message.strip()
-
-        if not last_speaker or last_speaker == speaker_id or not last_message:
-            return
-
-        pair = [(last_speaker, last_message), (speaker_id, message.strip())]
-        participants = {last_speaker, speaker_id}
-        for participant_id in participants:
-            await self._mark_dialogue_round_for_user(participant_id, session_id, pair)
+        impression_refresh_required = await self._mark_dialogue_round_for_user(
+            user_id,
+            session_id,
+            user_message,
+            clean_bot_message,
+        )
+        # 只有轮次成功进入缓存和计数后才标记已消费，避免数据库读取异常留下伪成功状态。
+        event.set_extra("_favour_dialogue_round_recorded", True)
+        return impression_refresh_required
 
     def _get_target_uid(self, event: AstrMessageEvent, text_arg: str) -> str | None:
         """获取目标用户ID，支持At和纯文本"""
@@ -951,10 +1012,19 @@ class FavourManagerTool(Star):
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def track_natural_dialogue_message(self, event: AstrMessageEvent):
+        """暂存当前事件的自然用户输入，等待同一事件的最终机器人回复配对。"""
+
         try:
-            speaker_id = str(event.get_sender_id())
             message = event.message_str or ""
-            await self._record_natural_dialogue_event(event, speaker_id, message)
+            if not self._is_natural_dialogue_message(message):
+                return
+            session_id = self._get_session_id(event)
+            if not session_id or not self._is_favour_session_enabled(session_id):
+                return
+
+            event.set_extra("_favour_dialogue_user_id", str(event.get_sender_id()))
+            event.set_extra("_favour_dialogue_session_id", session_id)
+            event.set_extra("_favour_dialogue_user_message", message.strip())
         except Exception as e:
             logger.error(f"Track natural dialogue message failed: {e}")
 
@@ -966,11 +1036,8 @@ class FavourManagerTool(Star):
             session_id = self._get_session_id(event)
             user_id = str(event.get_sender_id())
 
-            if session_id != "global":
-                if self.allowed_sessions and session_id not in self.allowed_sessions:
-                    return
-                if session_id in self.blocked_sessions:
-                    return
+            if not self._is_favour_session_enabled(session_id):
+                return
 
             message = event.message_str or ""
             is_spam, _ = await self._is_spam_behavior(user_id, message, event)
@@ -1151,6 +1218,9 @@ or [刷分检测：否]
             return
         msg_id = str(event.message_obj.message_id)
         text = resp.completion_text
+        if text and text.strip():
+            # 仅由实际经过 AstrBot 回复链路的 LLM 响应解锁印象轮次记录。
+            event.set_extra("_favour_llm_response_received", True)
 
         update_data = {
             "change": 0,
@@ -1210,7 +1280,38 @@ or [刷分检测：否]
                 new_chain.append(comp)
         res.chain = new_chain
 
+        bot_reply_text = self._extract_plain_text_from_result(event)
+        impression_refresh_required = False
+        if bot_reply_text:
+            # 先计入本轮，确保后续主写库同步保存最新自然对话轮数；
+            # 后台刷新则必须等写库成功后再调度，避免新印象被旧记录覆盖。
+            impression_refresh_required = await self._record_completed_dialogue_round(
+                event, bot_reply_text
+            )
+
         if not data:
+            # 即使好感度控制标签解析失败，也保留已经真实完成的一问一答。
+            user_id = str(event.get_extra("_favour_dialogue_user_id", "") or "")
+            session_id = str(event.get_extra("_favour_dialogue_session_id", "") or "")
+            dialogue_round_count = self.pending_dialogue_round_updates.get(
+                (user_id, session_id)
+            )
+            if dialogue_round_count is not None:
+                update_success = await self.db_manager.update_favour(
+                    user_id,
+                    session_id,
+                    dialogue_round_count=dialogue_round_count,
+                )
+                if not update_success:
+                    logger.error(
+                        "保存自然对话轮数失败: user_id=%s session_id=%s count=%s",
+                        user_id,
+                        session_id,
+                        dialogue_round_count,
+                    )
+                    return
+            if impression_refresh_required:
+                self._schedule_impression_refresh(user_id, session_id)
             return
 
         try:
@@ -1268,12 +1369,6 @@ or [刷分检测：否]
             # 更新互动次数
             current_interact_count = record.interact_count + 1 if record else 1
 
-            # 使用从LLM响应中提取的印象
-            impression = record.impression if record else ""
-            if False and False:
-                # 如果LLM没有生成印象，使用原有的印象
-                impression = impression
-
             # 确定最终的互动次数
             interact_count = current_interact_count
             dialogue_round_count = self.pending_dialogue_round_updates.get(
@@ -1282,16 +1377,21 @@ or [刷分检测：否]
             )
 
             # 更新数据库
-            await self.db_manager.update_favour(
+            update_success = await self.db_manager.update_favour(
                 user_id,
                 session_id,
-                new_fav,
-                rel,
-                False,
-                interact_count,
-                dialogue_round_count,
-                impression,
+                favour=new_fav,
+                relationship=rel,
+                is_unique=False,
+                interact_count=interact_count,
+                dialogue_round_count=dialogue_round_count,
             )
+            if not update_success:
+                raise RuntimeError(
+                    f"主好感度数据写入失败: user_id={user_id} session_id={session_id}"
+                )
+            if impression_refresh_required:
+                self._schedule_impression_refresh(user_id, session_id)
 
             # 更新每日好感度变化记录
             await self._update_daily_favour_change(user_id, data["change"])
@@ -1299,10 +1399,6 @@ or [刷分检测：否]
             log_msg = f"用户 {user_id} (会话 {session_id}) 数据更新: 好感度 {old_fav}->{new_fav} (Δ{data['change']})"
             if data.get("is_spam", False):
                 log_msg += ", 检测到刷分行为"
-            if impression:
-                old_impression = record.impression if record else "无"
-                if old_impression != impression:
-                    log_msg += f", 印象更新为 {impression}"
             if llm_suggested_change != data["change"]:
                 log_msg += (
                     f", LLM原始建议变化 {llm_suggested_change}"
@@ -1311,12 +1407,6 @@ or [刷分检测：否]
                 if adjusted_reason:
                     log_msg += f"（原因：{adjusted_reason}）"
             logger.info(log_msg)
-
-            bot_reply_text = self._extract_plain_text_from_result(event)
-            if bot_reply_text:
-                await self._record_natural_dialogue_event(
-                    event, self._get_bot_speaker_id(event), bot_reply_text
-                )
 
         except Exception as e:
             logger.error(f"更新好感度数据失败: {str(e)}\n{traceback.format_exc()}")
