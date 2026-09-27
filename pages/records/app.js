@@ -31,6 +31,7 @@ const state = {
   pageSize: 20,
   totalPages: 1,
   sessionId: GLOBAL_SESSION_ID,
+  sessionName: "",
   editingRow: null,
 };
 
@@ -41,10 +42,6 @@ function t(key, fallback) {
 function setStatus(message, isError = false) {
   dom.status.textContent = message;
   dom.status.classList.toggle("error", isError);
-}
-
-function sessionLabel(sessionId) {
-  return sessionId === GLOBAL_SESSION_ID ? t("globalSession", "全局") : sessionId;
 }
 
 function applyI18n() {
@@ -164,18 +161,20 @@ function renderRows(rows) {
   dom.empty.hidden = rows.length > 0;
 }
 
-function renderSessionFilter(sessionIds) {
-  const options = sessionIds.map((sessionId) => {
+function renderSessionFilter(sessions) {
+  const options = sessions.map((session) => {
     const option = document.createElement("option");
-    option.value = sessionId;
-    option.textContent = sessionLabel(sessionId);
+    option.value = session.session_id;
+    option.textContent =
+      session.session_id === GLOBAL_SESSION_ID ? t("globalSession", "全局") : session.name;
     return option;
   });
   dom.sessionFilter.replaceChildren(...options);
-  if (!sessionIds.includes(state.sessionId)) {
-    state.sessionId = sessionIds[0] || GLOBAL_SESSION_ID;
+  if (!sessions.some((session) => session.session_id === state.sessionId)) {
+    state.sessionId = sessions[0]?.session_id || GLOBAL_SESSION_ID;
   }
   dom.sessionFilter.value = state.sessionId;
+  state.sessionName = dom.sessionFilter.selectedOptions[0]?.textContent || state.sessionId;
 }
 
 async function load() {
@@ -196,7 +195,7 @@ async function load() {
     state.totalPages = data.total_pages;
     state.sessionId = data.session_id;
 
-    renderSessionFilter(data.session_ids || []);
+    renderSessionFilter(data.sessions || []);
     renderOverview(data.overview);
     renderRows(data.rows || []);
 
@@ -216,9 +215,9 @@ async function load() {
 
 function openEditor(row) {
   state.editingRow = row;
-  dom.editorSubject.textContent = `${t("session", "会话")}: ${sessionLabel(
-    state.sessionId,
-  )} · ${t("colUser", "用户")}: ${row.user_id}`;
+  dom.editorSubject.textContent = `${t("session", "会话")}: ${
+    state.sessionName
+  } · ${t("colUser", "用户")}: ${row.user_id}`;
   dom.editorFavour.value = row.favour;
   dom.editorRelationship.value = row.relationship || "";
   dom.editorImpression.value = row.impression || "";

@@ -1,6 +1,7 @@
 # web_api.py
 from astrbot.api import logger
 from astrbot.api.web import error_response, json_response, request
+from astrbot.core.umo_alias import build_umo_alias_map, normalize_umo_name, parse_umo
 
 from .utils import is_valid_userid
 
@@ -44,11 +45,14 @@ class FavourWebApi:
     async def list_records(self):
         """返回指定会话的记录列表、概览统计和可选会话列表。
 
+        会话展示名优先取 AstrCore 维护的 umo_aliases（/name 手动别名 > 平台自动群名），
+        都没有时退化为 UMO 里的会话号，因此 WebUI 无需持有 event 或 bot 也能显示群名。
+
         Args:
             无。参数全部来自 query：session_id、keyword、sort_by、desc、page、page_size。
 
         Returns:
-            包含 session_ids、overview、rows、total、page、page_size 的 JSON 响应。
+            包含 sessions、overview、rows、total、page、page_size 的 JSON 响应。
         """
         session_id = str(request.query.get("session_id", GLOBAL_SESSION_ID) or "")
         session_id = session_id.strip() or GLOBAL_SESSION_ID
@@ -118,7 +122,7 @@ class FavourWebApi:
         return json_response(
             {
                 "session_id": session_id,
-                "session_ids": await self.plugin.db_manager.get_all_session_ids(),
+                "sessions": await self._build_session_options(),
                 "overview": overview,
                 "rows": rows[start_index : start_index + page_size],
                 "total": total,
@@ -127,6 +131,32 @@ class FavourWebApi:
                 "total_pages": total_pages,
             }
         )
+
+    async def _build_session_options(self) -> list[dict[str, str]]:
+        """为会话下拉构建 [{session_id, name}]，全局会话固定排在最前。"""
+        session_ids = await self.plugin.db_manager.get_all_session_ids()
+        alias_map = build_umo_alias_map(
+            await self.plugin.context.get_db().get_umo_aliases(session_ids)
+        )
+        sessions = [
+            {
+                "session_id": session_id,
+                "name": (
+                    normalize_umo_name(
+                        getattr(alias_map.get(session_id), "user_alias", "")
+                    )
+                    or normalize_umo_name(
+                        getattr(alias_map.get(session_id), "auto_name", "")
+                    )
+                    or parse_umo(session_id)["session_id"]
+                ),
+            }
+            for session_id in session_ids
+        ]
+        sessions.sort(
+            key=lambda item: (item["session_id"] != GLOBAL_SESSION_ID, item["name"])
+        )
+        return sessions
 
     async def update_record(self):
         """修改单条或跨全部会话的好感度记录。
