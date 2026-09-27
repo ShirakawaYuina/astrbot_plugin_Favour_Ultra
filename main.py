@@ -23,6 +23,7 @@ from .image_sender import FavourImageSender
 from .permissions import PermissionManager, PermLevel
 from .storage import FavourDBManager, FavourRecord
 from .utils import is_valid_userid
+from .web_api import FavourWebApi
 
 
 class FavourManagerTool(Star):
@@ -144,6 +145,10 @@ class FavourManagerTool(Star):
             send_mode=self.config.get("image_send_mode", "base64"),
             url_base=self.config.get("image_send_url_base", ""),
         )
+
+        # WebUI 好感度管理台，页面位于 pages/records/
+        self.web_api = FavourWebApi(self)
+        self.web_api.register()
 
         self._validate_config()
 

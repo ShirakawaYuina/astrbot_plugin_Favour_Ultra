@@ -462,6 +462,16 @@ class FavourDBManager:
             result = await session.execute(stmt)
             return list(result.scalars().all())
 
+    async def get_all_session_ids(self) -> list[str]:
+        """获取所有存在记录的会话 ID，供 WebUI 会话筛选使用"""
+        await self.init_db()
+        async with self.async_session() as session:
+            stmt = select(FavourRecord.session_id).distinct()
+            result = await session.execute(stmt)
+            return [
+                str(session_id) for session_id in result.scalars().all() if session_id
+            ]
+
     async def clear_session(self, session_id: str | None = None) -> bool:
         """清空某会话记录"""
         await self.init_db()

@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>好感度管理台</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">Favour Ultra</p>
+        <h1 class="page-title" data-i18n="title">好感度管理台</h1>
+      </div>
+      <button id="refresh" class="btn" type="button" data-i18n="refresh">刷新</button>
+    </header>
+
+    <section class="toolbar">
+      <label class="field">
+        <span data-i18n="session">会话</span>
+        <select id="session-filter"></select>
+      </label>
+      <label class="field">
+        <span data-i18n="search">搜索</span>
+        <input
+          id="keyword"
+          type="search"
+          autocomplete="off"
+          placeholder="用户 ID 或印象"
+          data-i18n-placeholder="searchHint"
+        />
+      </label>
+      <label class="field">
+        <span data-i18n="sortBy">排序</span>
+        <select id="sort-by">
+          <option value="favour" data-i18n="sortFavour">好感度</option>
+          <option value="user_id" data-i18n="sortUserId">用户 ID</option>
+          <option value="updated_at" data-i18n="sortUpdatedAt">更新时间</option>
+        </select>
+      </label>
+      <label class="field">
+        <span data-i18n="order">顺序</span>
+        <select id="sort-desc">
+          <option value="true" data-i18n="desc">降序</option>
+          <option value="false" data-i18n="asc">升序</option>
+        </select>
+      </label>
+    </section>
+
+    <p id="status" class="status" role="status"></p>
+
+    <section id="overview" class="overview"></section>
+
+    <section class="table-wrap">
+      <table class="records">
+        <thead>
+          <tr>
+            <th data-i18n="colUser">用户</th>
+            <th class="num" data-i18n="colFavour">好感度</th>
+            <th data-i18n="colRelationship">关系</th>
+            <th class="num" data-i18n="colToday">今日变化</th>
+            <th data-i18n="colImpression">印象</th>
+            <th data-i18n="colUpdatedAt">更新时间</th>
+            <th class="actions" data-i18n="colActions">操作</th>
+          </tr>
+        </thead>
+        <tbody id="records-body"></tbody>
+      </table>
+      <p id="empty" class="empty" hidden data-i18n="empty">暂无记录</p>
+    </section>
+
+    <nav class="pager">
+      <button id="prev" class="btn" type="button" data-i18n="prev">上一页</button>
+      <span id="pager-label" class="pager-label"></span>
+      <button id="next" class="btn" type="button" data-i18n="next">下一页</button>
+    </nav>
+
+    <dialog id="editor" class="editor">
+      <form id="editor-form" method="dialog">
+        <h2 class="editor-title" data-i18n="editTitle">编辑记录</h2>
+        <p class="editor-subject" id="editor-subject"></p>
+        <label class="editor-field">
+          <span data-i18n="favour">好感度</span>
+          <input id="editor-favour" type="number" step="1" />
+        </label>
+        <label class="editor-field">
+          <span data-i18n="relationship">关系</span>
+          <input id="editor-relationship" type="text" maxlength="32" />
+        </label>
+        <label class="editor-field">
+          <span data-i18n="impression">印象</span>
+          <input id="editor-impression" type="text" maxlength="64" />
+        </label>
+        <label class="editor-checkbox">
+          <input id="editor-all-sessions" type="checkbox" />
+          <span data-i18n="applyAllSessions">应用到所有会话（仅好感度）</span>
+        </label>
+        <p id="editor-error" class="editor-error" role="alert"></p>
+        <div class="editor-actions">
+          <button id="editor-cancel" class="btn" type="button" data-i18n="cancel">取消</button>
+          <button class="btn primary" type="submit" data-i18n="save">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
