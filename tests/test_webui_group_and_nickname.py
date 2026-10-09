@@ -141,20 +141,32 @@ async def test_web_api_group_filter_global_mode(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_build_session_options_aggregation(tmp_path: Path):
-    """测试会话选项聚合（在线群列表、已知别名与发言群）"""
+    """测试会话选项聚合：私聊彻底排除、死群过滤、黑名单联动、活跃群保留"""
     db = FavourDBManager(data_dir=tmp_path)
     await db.init_db()
 
+    # 1. 活跃群 7777 有发言记录
     await db.record_daily_group_utterance("7777", "u1", "用户", "嗨", "2026-10-09")
+    # 活跃群 1072408967 也有发言记录
+    await db.record_daily_group_utterance("1072408967", "u2", "用户2", "你好", "2026-10-09")
+    # 插入私聊记录（应当被彻底排除）
+    await db.update_favour("u3", "astrbot:FriendMessage:1158662154", favour=20, nickname="私聊好友")
+    await db.update_favour("u4", "webchat:FriendMessage:webchat!abc", favour=10, nickname="网页私聊")
 
+    # 在线列表包含：活跃群 1072408967、死群 1085132297、黑名单群 6666
     mock_bot = MagicMock()
     mock_bot.call_action = AsyncMock(return_value=[
-        {"group_id": 1072408967, "group_name": "绒布球避难所"}
+        {"group_id": 1072408967, "group_name": "新-绒布球避难所"},
+        {"group_id": 1085132297, "group_name": "死群-已被封禁"},
+        {"group_id": 6666, "group_name": "黑名单群"},
     ])
 
     mock_plugin = MagicMock()
     mock_plugin.db_manager = db
+    mock_plugin.webui_filter_empty_groups = True
     mock_plugin.context.get_db().get_umo_aliases = AsyncMock(return_value=[])
+    # 模拟黑名单：屏蔽 6666
+    mock_plugin._is_favour_session_enabled = lambda sid: str(sid).split(":")[-1] != "6666"
 
     api = FavourWebApi(mock_plugin)
     api._get_platform_bot = lambda: mock_bot
@@ -164,11 +176,29 @@ async def test_build_session_options_aggregation(tmp_path: Path):
 
     # 全局固定排在最前面
     assert sessions[0]["session_id"] == GLOBAL_SESSION_ID
-    # 在线群列表包含
+    # 活跃群保留
     assert "1072408967" in s_ids
     opt_1072 = next(s for s in sessions if s["session_id"] == "1072408967")
-    assert "绒布球避难所 (1072408967)" == opt_1072["name"]
-    # 日常发言群 7777 也包含
+    assert "新-绒布球避难所 (1072408967)" == opt_1072["name"]
     assert "7777" in s_ids
+
+    # 死群 1085132297 无任何记录且无发言，已被自动过滤排除
+    assert "1085132297" not in s_ids
+
+    # 黑名单群 6666 已被黑名单机制排除
+    assert "6666" not in s_ids
+
+    # 私聊会话必须彻底排除，绝不出现在下拉选项中
+    assert "astrbot:FriendMessage:1158662154" not in s_ids
+    assert "1158662154" not in s_ids
+    assert "webchat:FriendMessage:webchat!abc" not in s_ids
+
+    # 若关闭死群过滤开关，则未被黑名单封禁的无记录群也会显示
+    mock_plugin.webui_filter_empty_groups = False
+    sessions_all = await api._build_session_options()
+    s_ids_all = [s["session_id"] for s in sessions_all]
+    assert "1085132297" in s_ids_all
+    assert "6666" not in s_ids_all  # 黑名单依然生效
+    assert "1158662154" not in s_ids_all  # 私聊依然彻底排除
 
     await db.close()

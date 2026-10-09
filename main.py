@@ -62,8 +62,19 @@ class FavourManagerTool(Star):
         self.favour_decrease_min = adv_conf.get("favour_decrease_min", 1)
         self.favour_decrease_max = adv_conf.get("favour_decrease_max", 5)
         self.perm_level_threshold = adv_conf.get("level_threshold", 50)
-        self.blocked_sessions = adv_conf.get("blocked_sessions", [])
-        self.allowed_sessions = adv_conf.get("allowed_sessions", [])
+        self.blocked_sessions = [
+            str(s).strip()
+            for s in adv_conf.get("blocked_sessions", [])
+            if str(s).strip()
+        ]
+        self.allowed_sessions = [
+            str(s).strip()
+            for s in adv_conf.get("allowed_sessions", [])
+            if str(s).strip()
+        ]
+        self.webui_filter_empty_groups = adv_conf.get(
+            "webui_filter_empty_groups", True
+        )
         self.impression_natural_rounds = max(
             1, adv_conf.get("natural_dialogue_rounds", 8)
         )
@@ -307,11 +318,26 @@ class FavourManagerTool(Star):
 
         if not session_id:
             return False
-        if session_id == "global":
+        session_id_str = str(session_id).strip()
+        if session_id_str == "global":
             return True
-        if self.allowed_sessions and session_id not in self.allowed_sessions:
+        raw_id = (
+            session_id_str.split(":")[-1]
+            if ":" in session_id_str
+            else session_id_str
+        )
+        if self.allowed_sessions:
+            if (
+                session_id_str not in self.allowed_sessions
+                and raw_id not in self.allowed_sessions
+            ):
+                return False
+        if (
+            session_id_str in self.blocked_sessions
+            or raw_id in self.blocked_sessions
+        ):
             return False
-        return session_id not in self.blocked_sessions
+        return True
 
     def _append_user_dialogue_round(
         self,

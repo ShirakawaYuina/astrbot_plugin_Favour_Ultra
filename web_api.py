@@ -229,13 +229,72 @@ class FavourWebApi:
         )
 
     async def _build_session_options(self) -> list[dict[str, str]]:
-        """为会话下拉构建 [{session_id, name}]，汇聚平台在线群、已知别名和发言记录，全局会话固定排在最前。"""
+        """为会话下拉构建 [{session_id, name}]，汇聚平台在线群、已知别名和发言记录，全局会话固定排在最前。
+
+        排除所有私聊与个人会话；对于无好感记录且无近期发言的死群/封禁群，根据配置进行过滤。
+        """
         sessions: list[dict[str, str]] = [
             {"session_id": GLOBAL_SESSION_ID, "name": "全局"}
         ]
         seen_gids: set[str] = set()
 
-        # 1. 尝试从在线 OneBot 平台获取群列表 (最全面、最新)
+        filter_empty = getattr(self.plugin, "webui_filter_empty_groups", True)
+
+        # 1. 收集系统中确有发言或好感记录的群 ID
+        active_gids: set[str] = set()
+        try:
+            utterance_gids = (
+                await self.plugin.db_manager.get_all_utterance_group_ids()
+            )
+            for gid in utterance_gids:
+                raw_gid = gid.split(":")[-1] if ":" in gid else gid
+                if raw_gid:
+                    active_gids.add(raw_gid)
+                    active_gids.add(gid)
+        except Exception as e:
+            logger.debug(f"从日常发言获取群集合提示: {e}")
+
+        try:
+            db_sessions = await self.plugin.db_manager.get_all_session_ids()
+            for sid in db_sessions:
+                if sid == GLOBAL_SESSION_ID:
+                    continue
+                sid_lower = sid.lower()
+                # 严格过滤私聊与非群聊会话
+                if (
+                    "friend" in sid_lower
+                    or "private" in sid_lower
+                    or "webchat" in sid_lower
+                    or "direct" in sid_lower
+                ):
+                    continue
+                if "group" in sid_lower:
+                    raw_id = sid.split(":")[-1] if ":" in sid else sid
+                    if raw_id:
+                        active_gids.add(raw_id)
+                        active_gids.add(sid)
+        except Exception as e:
+            logger.debug(f"从 favour_records 获取群会话提示: {e}")
+
+        # 2. 从 AstrCore umo_aliases 收集已知群聊与别名映射
+        alias_groups: dict[str, str] = {}
+        try:
+            core_aliases = await self.plugin.context.get_db().get_umo_aliases()
+            for alias in core_aliases:
+                umo = str(alias.umo or "")
+                if "group" in umo.lower():
+                    raw_gid = umo.split(":")[-1] if ":" in umo else umo
+                    if raw_gid:
+                        name = (
+                            normalize_umo_name(getattr(alias, "user_alias", None))
+                            or normalize_umo_name(getattr(alias, "auto_name", None))
+                            or raw_gid
+                        )
+                        alias_groups[raw_gid] = name
+        except Exception as e:
+            logger.debug(f"从 umo_aliases 收集群聊提示: {e}")
+
+        # 3. 尝试从在线 OneBot 平台获取群列表 (最全面、最新)
         bot = self._get_platform_bot()
         if bot:
             try:
@@ -245,7 +304,23 @@ class FavourWebApi:
                         gid = str(g.get("group_id") or "").strip()
                         if not gid:
                             continue
+
+                        # 会话黑白名单检查
+                        if hasattr(self.plugin, "_is_favour_session_enabled"):
+                            if not self.plugin._is_favour_session_enabled(gid):
+                                continue
+
+                        # 排除死群/无数据群（无好感记录、无发言、无主动别名）
+                        if filter_empty:
+                            if (
+                                gid not in active_gids
+                                and gid not in alias_groups
+                            ):
+                                continue
+
                         gname = str(g.get("group_name") or "").strip()
+                        if not gname and gid in alias_groups:
+                            gname = alias_groups[gid]
                         display_name = (
                             f"{gname} ({gid})" if gname else f"群聊 ({gid})"
                         )
@@ -254,66 +329,38 @@ class FavourWebApi:
             except Exception as e:
                 logger.debug(f"获取平台群列表提示: {e}")
 
-        # 2. 从 AstrCore umo_aliases 补充已知群聊
-        try:
-            core_aliases = await self.plugin.context.get_db().get_umo_aliases()
-            alias_map = build_umo_alias_map(core_aliases)
-            for alias in core_aliases:
-                umo = str(alias.umo or "")
-                if "group" in umo.lower():
-                    raw_gid = umo.split(":")[-1] if ":" in umo else umo
-                    if raw_gid and raw_gid not in seen_gids:
-                        name = (
-                            normalize_umo_name(getattr(alias, "user_alias", None))
-                            or normalize_umo_name(getattr(alias, "auto_name", None))
-                            or raw_gid
-                        )
-                        display_name = (
-                            f"{name} ({raw_gid})"
-                            if name != raw_gid
-                            else f"群聊 ({raw_gid})"
-                        )
-                        sessions.append({"session_id": raw_gid, "name": display_name})
-                        seen_gids.add(raw_gid)
-        except Exception as e:
-            logger.debug(f"从 umo_aliases 补充群聊提示: {e}")
-
-        # 3. 从日常发言记录表 daily_group_utterances 补充出现过的群
-        try:
-            utterance_gids = (
-                await self.plugin.db_manager.get_all_utterance_group_ids()
-            )
-            for gid in utterance_gids:
-                raw_gid = gid.split(":")[-1] if ":" in gid else gid
-                if raw_gid and raw_gid not in seen_gids:
-                    sessions.append(
-                        {"session_id": raw_gid, "name": f"群聊 ({raw_gid})"}
-                    )
-                    seen_gids.add(raw_gid)
-        except Exception as e:
-            logger.debug(f"从日常发言补充群聊提示: {e}")
-
-        # 4. 从历史 favour_records 的 session_id 补充
-        try:
-            db_sessions = await self.plugin.db_manager.get_all_session_ids()
-            for sid in db_sessions:
-                if sid == GLOBAL_SESSION_ID:
+        # 4. 从 alias_groups 补充已知群聊
+        for raw_gid, name in alias_groups.items():
+            if raw_gid not in seen_gids:
+                if hasattr(self.plugin, "_is_favour_session_enabled"):
+                    if not self.plugin._is_favour_session_enabled(raw_gid):
+                        continue
+                if filter_empty and raw_gid not in active_gids:
                     continue
-                raw_id = sid.split(":")[-1] if ":" in sid else sid
-                if raw_id not in seen_gids and sid not in seen_gids:
-                    if "group" in sid.lower():
-                        sessions.append(
-                            {"session_id": sid, "name": f"群聊 ({raw_id})"}
-                        )
-                    elif "friend" in sid.lower():
-                        sessions.append(
-                            {"session_id": sid, "name": f"私聊 ({raw_id})"}
-                        )
-                    else:
-                        sessions.append({"session_id": sid, "name": sid})
-                    seen_gids.add(raw_id)
-        except Exception as e:
-            logger.debug(f"从 favour_records 补充会话提示: {e}")
+                display_name = (
+                    f"{name} ({raw_gid})" if name != raw_gid else f"群聊 ({raw_gid})"
+                )
+                sessions.append({"session_id": raw_gid, "name": display_name})
+                seen_gids.add(raw_gid)
+
+        # 5. 从 active_gids 补充尚未加入且合法的群聊
+        for gid in active_gids:
+            raw_gid = gid.split(":")[-1] if ":" in gid else gid
+            if raw_gid not in seen_gids and gid not in seen_gids:
+                if hasattr(self.plugin, "_is_favour_session_enabled"):
+                    if not self.plugin._is_favour_session_enabled(
+                        raw_gid
+                    ) and not self.plugin._is_favour_session_enabled(gid):
+                        continue
+                name = alias_groups.get(raw_gid, "")
+                display_name = (
+                    f"{name} ({raw_gid})"
+                    if name and name != raw_gid and not name.startswith("群聊")
+                    else f"群聊 ({raw_gid})"
+                )
+                sessions.append({"session_id": raw_gid, "name": display_name})
+                seen_gids.add(raw_gid)
+                seen_gids.add(gid)
 
         # 排序：全局第一，其他群按名称排序
         sessions.sort(

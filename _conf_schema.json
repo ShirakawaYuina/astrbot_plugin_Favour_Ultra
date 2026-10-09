@@ -134,6 +134,12 @@
                 "default": [],
                 "hint": "如果此列表不为空，则只有在此列表中的会话才会启用好感度系统。"
             },
+            "webui_filter_empty_groups": {
+                "description": "WebUI 筛选排除无记录与死群",
+                "type": "bool",
+                "default": true,
+                "hint": "开启后，WebUI 会话下拉框自动排除无好感记录且无发言的群聊（包括被封禁的死群）。"
+            },
             "daily_impression_config": {
                 "description": "每日群活跃用户印象分析配置",
                 "type": "object",
