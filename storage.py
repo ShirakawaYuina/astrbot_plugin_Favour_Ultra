@@ -1,7 +1,7 @@
 # storage.py
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from aiofiles import open as aio_open
@@ -32,8 +32,8 @@ class FavourRecord(SQLModel, table=True):
     dialogue_round_count: int = Field(default=0)
     impression: str = Field(default="")
     is_unique: bool = Field(default=False)
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class DailyFavourChange(SQLModel, table=True):
@@ -44,8 +44,21 @@ class DailyFavourChange(SQLModel, table=True):
     user_id: str = Field(index=True)
     date: str = Field(index=True)  # 格式: YYYY-MM-DD
     change: int = Field(default=0)
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class DailyGroupUtterance(SQLModel, table=True):
+    __tablename__ = "daily_group_utterances"
+    __table_args__ = {"extend_existing": True}
+
+    id: int | None = Field(default=None, primary_key=True)
+    group_id: str = Field(index=True)
+    user_id: str = Field(index=True)
+    user_name: str = Field(default="")
+    date: str = Field(index=True)  # 格式: YYYY-MM-DD
+    content: str = Field(default="", max_length=300)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class FavourDBManager:
@@ -172,6 +185,17 @@ class FavourDBManager:
                         logger.info("创建 daily_favour_changes 表...")
                         await conn.run_sync(SQLModel.metadata.create_all)
                         logger.info("数据库初始化：创建了 daily_favour_changes 表")
+
+                    # 确保创建 daily_group_utterances 表
+                    result_utt = await conn.execute(
+                        text(
+                            "SELECT name FROM sqlite_master WHERE type='table' AND name='daily_group_utterances'"
+                        )
+                    )
+                    if not result_utt.scalar():
+                        logger.info("创建 daily_group_utterances 表...")
+                        await conn.run_sync(SQLModel.metadata.create_all)
+                        logger.info("数据库初始化：创建了 daily_group_utterances 表")
 
                 self._initialized = True
                 logger.info(f"好感度数据库已初始化: {self.db_path}")
@@ -352,7 +376,7 @@ class FavourDBManager:
                         record.dialogue_round_count = dialogue_round_count
                     if impression is not None:
                         record.impression = impression
-                    record.updated_at = datetime.now()
+                    record.updated_at = datetime.now(timezone.utc)
                     session.add(record)
 
                 await session.commit()
@@ -386,14 +410,14 @@ class FavourDBManager:
                         max_favour = 100 if user_id == "1158662154" else 99
                         record.favour = max(self.min_val, min(max_favour, favour))
                         record.relationship = self._get_relationship(record.favour)
-                        record.updated_at = datetime.now()
+                        record.updated_at = datetime.now(timezone.utc)
                         session.add(record)
 
                     await session.commit()
                     return len(records)
                 else:
                     # 构建更新字典
-                    values = {"updated_at": datetime.now()}
+                    values = {"updated_at": datetime.now(timezone.utc)}
                     if relationship is not None:
                         values["relationship"] = relationship
                     if is_unique is not None:
@@ -532,7 +556,7 @@ class FavourDBManager:
                     )
                 else:
                     record.change = change
-                    record.updated_at = datetime.now()
+                    record.updated_at = datetime.now(timezone.utc)
 
                 session.add(record)
                 await session.commit()
@@ -565,7 +589,7 @@ class FavourDBManager:
                 stmt = (
                     update(FavourRecord)
                     .where(FavourRecord.favour < 0)
-                    .values(favour=0, updated_at=datetime.now())
+                    .values(favour=0, updated_at=datetime.now(timezone.utc))
                 )
                 result = await session.execute(stmt)
                 await session.commit()
@@ -573,3 +597,193 @@ class FavourDBManager:
         except Exception as e:
             logger.error(f"重置负好感度失败: {e}")
             return 0
+
+    async def record_daily_group_utterance(
+        self,
+        group_id: str,
+        user_id: str,
+        user_name: str,
+        content: str,
+        date: str,
+        max_daily_count: int = 50,
+    ) -> bool:
+        """记录用户在群内的发言，若单日达到条数上限则不再记录。
+
+        Args:
+            group_id: 群会话ID。
+            user_id: 用户ID。
+            user_name: 用户群昵称。
+            content: 发言纯文本。
+            date: 日期字符串 (YYYY-MM-DD)。
+            max_daily_count: 单人单群每日最大暂存条数。
+
+        Returns:
+            成功写入返回 True，超出条数上限或发生异常返回 False。
+        """
+        await self.init_db()
+        try:
+            async with self.async_session() as session:
+                stmt_count = select(DailyGroupUtterance).where(
+                    DailyGroupUtterance.group_id == group_id,
+                    DailyGroupUtterance.user_id == user_id,
+                    DailyGroupUtterance.date == date,
+                )
+                existing = (await session.execute(stmt_count)).scalars().all()
+                if len(existing) >= max_daily_count:
+                    return False
+
+                record = DailyGroupUtterance(
+                    group_id=group_id,
+                    user_id=user_id,
+                    user_name=user_name,
+                    content=content,
+                    date=date,
+                )
+                session.add(record)
+                await session.commit()
+                return True
+        except Exception as e:
+            logger.error(f"记录群用户发言失败: {e}")
+            return False
+
+    async def get_active_groups_by_date(self, date: str) -> list[str]:
+        """获取指定日期有发言记录的所有群会话ID列表。
+
+        Args:
+            date: 目标日期字符串 (YYYY-MM-DD)。
+
+        Returns:
+            不重复的群会话ID列表。
+        """
+        await self.init_db()
+        try:
+            async with self.async_session() as session:
+                stmt = (
+                    select(DailyGroupUtterance.group_id)
+                    .where(DailyGroupUtterance.date == date)
+                    .distinct()
+                )
+                result = await session.execute(stmt)
+                return [r for r in result.scalars().all() if r]
+        except Exception as e:
+            logger.error(f"获取活跃群列表失败: {e}")
+            return []
+
+    async def get_group_active_users_utterances(
+        self,
+        group_id: str,
+        date: str,
+        min_msg_count: int = 10,
+        min_total_chars: int = 50,
+    ) -> dict[str, dict]:
+        """查询指定群在目标日期达到活跃门槛的用户发言记录。
+
+        Args:
+            group_id: 群会话ID。
+            date: 目标日期字符串 (YYYY-MM-DD)。
+            min_msg_count: 活跃判定最少发言条数。
+            min_total_chars: 活跃判定最少总字数。
+
+        Returns:
+            用户活跃数据字典：{user_id: {"user_name": str, "messages": list[str], "msg_count": int, "total_chars": int}}。
+        """
+        await self.init_db()
+        try:
+            async with self.async_session() as session:
+                stmt = (
+                    select(DailyGroupUtterance)
+                    .where(
+                        DailyGroupUtterance.group_id == group_id,
+                        DailyGroupUtterance.date == date,
+                    )
+                    .order_by(DailyGroupUtterance.id.asc())
+                )
+                result = await session.execute(stmt)
+                records = result.scalars().all()
+
+                user_data: dict[str, dict] = {}
+                for r in records:
+                    uid = str(r.user_id)
+                    if uid not in user_data:
+                        user_data[uid] = {
+                            "user_name": r.user_name or uid,
+                            "messages": [],
+                            "msg_count": 0,
+                            "total_chars": 0,
+                        }
+                    user_data[uid]["messages"].append(r.content)
+                    user_data[uid]["msg_count"] += 1
+                    user_data[uid]["total_chars"] += len(r.content)
+                    if r.user_name:
+                        user_data[uid]["user_name"] = r.user_name
+
+                # 筛选满足活跃门槛的用户 (发言 >= min_msg_count 或 总字数 >= min_total_chars)
+                filtered = {
+                    uid: data
+                    for uid, data in user_data.items()
+                    if data["msg_count"] >= min_msg_count
+                    or data["total_chars"] >= min_total_chars
+                }
+                return filtered
+        except Exception as e:
+            logger.error(f"查询群活跃用户发言失败: {e}")
+            return {}
+
+    async def get_user_activity_across_groups(
+        self, date: str
+    ) -> dict[str, dict[str, int]]:
+        """获取目标日期各用户在所有群的发言总字数，用于全局模式下判定主活跃群。
+
+        Args:
+            date: 目标日期字符串 (YYYY-MM-DD)。
+
+        Returns:
+            各用户在各群发言字数字典：{user_id: {group_id: total_chars}}。
+        """
+        await self.init_db()
+        try:
+            async with self.async_session() as session:
+                stmt = select(DailyGroupUtterance).where(
+                    DailyGroupUtterance.date == date
+                )
+                records = (await session.execute(stmt)).scalars().all()
+                activity: dict[str, dict[str, int]] = {}
+                for r in records:
+                    uid = str(r.user_id)
+                    gid = str(r.group_id)
+                    if uid not in activity:
+                        activity[uid] = {}
+                    activity[uid][gid] = activity[uid].get(gid, 0) + len(r.content)
+                return activity
+        except Exception as e:
+            logger.error(f"获取跨群活跃统计失败: {e}")
+            return {}
+
+    async def clean_expired_group_utterances(self, cutoff_date: str) -> int:
+        """清理早于截止日期的过期群发言记录。
+
+        Args:
+            cutoff_date: 截止日期字符串 (YYYY-MM-DD)，早于此日期的记录将被删除。
+
+        Returns:
+            被删除的记录行数。
+        """
+        await self.init_db()
+        try:
+            async with self.async_session() as session:
+                stmt = delete(DailyGroupUtterance).where(
+                    DailyGroupUtterance.date < cutoff_date
+                )
+                result = await session.execute(stmt)
+                await session.commit()
+                return result.rowcount
+        except Exception as e:
+            logger.error(f"清理过期发言记录失败: {e}")
+            return 0
+
+    async def close(self) -> None:
+        """显式释放数据库引擎资源，避免文件句柄锁定。"""
+        try:
+            await self.engine.dispose()
+        except Exception as e:
+            logger.error(f"关闭数据库引擎失败: {e}")

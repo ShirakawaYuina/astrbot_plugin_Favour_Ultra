@@ -1,6 +1,7 @@
 # main.py
 import asyncio
 import base64
+import json
 import mimetypes
 import re
 import traceback
@@ -27,6 +28,12 @@ from .web_api import FavourWebApi
 
 
 class FavourManagerTool(Star):
+    enable_daily_impression: bool = False
+    daily_impression_time: str = "03:30"
+    daily_imp_min_messages: int = 10
+    daily_imp_min_chars: int = 50
+    daily_imp_max_user_messages: int = 50
+
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.context = context  # 存储context引用，用于访问LLM provider
@@ -62,6 +69,20 @@ class FavourManagerTool(Star):
         self.impression_provider = str(
             adv_conf.get("impression_provider", "") or ""
         ).strip()
+        daily_imp_conf = adv_conf.get("daily_impression_config", {})
+        self.enable_daily_impression = daily_imp_conf.get(
+            "enable_daily_impression", True
+        )
+        self.daily_impression_time = daily_imp_conf.get(
+            "schedule_time", "03:30"
+        )
+        self.daily_imp_min_messages = daily_imp_conf.get(
+            "min_daily_messages", 10
+        )
+        self.daily_imp_min_chars = daily_imp_conf.get("min_daily_chars", 50)
+        self.daily_imp_max_user_messages = daily_imp_conf.get(
+            "max_daily_messages_per_user", 50
+        )
 
         # 惩罚机制配置
         penalty_conf = adv_conf.get("penalty_config", {})
@@ -176,6 +197,10 @@ class FavourManagerTool(Star):
             if self.enable_favour_reset:
                 await self._register_favour_reset_task()
 
+            # 注册每日群活跃用户印象分析任务
+            if self.enable_daily_impression:
+                await self._register_daily_impression_task()
+
         except Exception as e:
             logger.error(f"数据库初始化或迁移失败: {str(e)}\n{traceback.format_exc()}")
 
@@ -215,6 +240,33 @@ class FavourManagerTool(Star):
             logger.info(f"好感度回归定时任务已注册: cron={cron_expr}")
         except Exception as e:
             logger.error(f"注册好感度回归定时任务失败: {e}")
+
+    async def _register_daily_impression_task(self):
+        """注册每日群活跃用户印象分析定时任务"""
+        try:
+            task_name = "daily_group_impression_analysis"
+            time_parts = self.daily_impression_time.split(":")
+            hour = int(time_parts[0]) if len(time_parts) > 0 else 3
+            minute = int(time_parts[1]) if len(time_parts) > 1 else 30
+
+            cron_expr = f"{minute} {hour} * * *"
+
+            existing_jobs = await self.context.cron_manager.list_jobs(job_type="basic")
+            for job in existing_jobs:
+                if job.name == task_name:
+                    await self.context.cron_manager.delete_job(job.job_id)
+
+            await self.context.cron_manager.add_basic_job(
+                name=task_name,
+                cron_expression=cron_expr,
+                handler=self._run_daily_group_impression_batch,
+                description="每日定时拉取各群聊天记录分析活跃用户印象",
+                enabled=True,
+                persistent=False,
+            )
+            logger.info(f"每日群活跃用户印象分析任务已注册: cron={cron_expr}")
+        except Exception as e:
+            logger.error(f"注册每日群活跃用户印象分析任务失败: {e}")
 
     async def _favour_reset_task(self):
         """好感度回归任务处理函数"""
@@ -444,6 +496,212 @@ class FavourManagerTool(Star):
             logger.error(f"Refresh impression from dialogue failed: {e}")
         finally:
             self.impression_refresh_locks.discard(lock_key)
+
+    @staticmethod
+    def _build_group_impression_prompt(
+        group_id: str,
+        active_users: dict[str, dict],
+        user_existing_impressions: dict[str, str] | None = None,
+    ) -> str:
+        """构建针对群聊所有活跃成员的单次印象分析提示词。
+
+        Args:
+            group_id: 群会话ID。
+            active_users: 活跃用户数据字典 {uid: {"user_name": str, "messages": list[str]}}。
+            user_existing_impressions: 用户的历史既有印象映射 {uid: str}。
+
+        Returns:
+            发送给大模型的完整提示词文本。
+        """
+        existing_map = user_existing_impressions or {}
+        user_sections = []
+        for idx, (uid, data) in enumerate(active_users.items(), start=1):
+            name = data.get("user_name", uid)
+            msgs = data.get("messages", [])
+            old_imp = existing_map.get(uid, "").strip()
+            old_tag = f" (既有印象: {old_imp})" if old_imp else ""
+            msg_list = "\n".join(f"- {m}" for m in msgs)
+            user_sections.append(
+                f"【成员 {idx}】UID: {uid}, 昵称: {name}{old_tag}\n发言列表:\n{msg_list}"
+            )
+
+        users_text = "\n\n".join(user_sections)
+        prompt = (
+            f"你是一个敏锐细腻的群聊人设观察员。\n"
+            f"以下是群聊【{group_id}】在过去一天中各活跃成员的真实发言记录。\n"
+            f"请阅读各成员的言行与互动氛围，为每一位活跃成员提炼一句生动的“今日人设印象”。\n\n"
+            f"【群成员发言记录】\n"
+            f"{users_text}\n\n"
+            f"【生成要求】\n"
+            f"1. 观察每位成员的发言风格、情绪倾向和常聊话题（例如：热心技术宅、造梗气氛组、吐槽狂人、佛系摸鱼人等）；\n"
+            f"2. 为每位成员生成一句不超过 10 个汉字的印象；\n"
+            f"3. 若成员存在既有印象，请在原有基调上平滑微调或深化，避免仅因一两句话剧烈颠覆；\n"
+            f"4. 必须以严格的标准 JSON 键值对格式输出，键为成员的 UID 字符串，值为不超过 10 个汉字的印象字符串；\n"
+            f"5. 严禁输出 Markdown 代码块标记（如 ```json ），严禁附带解释或多余字符，直接输出标准 JSON 对象。\n\n"
+            f"【输出示例】\n"
+            f'{{"10001": "爱吐槽的加班打工人", "10002": "高频造梗气氛组"}}'
+        )
+        return prompt
+
+    @staticmethod
+    def _parse_group_impression_json(response_text: str) -> dict[str, str]:
+        """解析并清洗大模型返回的群印象 JSON 结果。
+
+        Args:
+            response_text: 大模型返回的原始回复文本。
+
+        Returns:
+            {user_id: cleaned_impression} 字典。
+        """
+        if not response_text:
+            return {}
+        text = response_text.strip()
+        text = re.sub(
+            r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE | re.MULTILINE
+        )
+        text = re.sub(r"\s*```$", "", text, flags=re.MULTILINE).strip()
+
+        json_match = re.search(r"\{[\s\S]*\}", text)
+        if json_match:
+            text = json_match.group(0)
+
+        try:
+            data = json.loads(text)
+        except Exception as e:
+            logger.error(f"解析群印象 JSON 失败: {e}, 原文: {response_text[:300]}")
+            return {}
+
+        if not isinstance(data, dict):
+            return {}
+
+        result = {}
+        for uid, raw_imp in data.items():
+            if not isinstance(raw_imp, str):
+                continue
+            cleaned = str(raw_imp).strip()
+            cleaned = re.sub(
+                r"^(?:目标用户的?|该用户的?|用户)?(?:印象(?:是)?|特质|评价|画像)[:：\s]*",
+                "",
+                cleaned,
+            )
+            cleaned = cleaned.strip("“”\"'‘’。，！! ")
+            if cleaned:
+                result[str(uid)] = cleaned[:10] if len(cleaned) > 10 else cleaned
+        return result
+
+    async def _run_daily_group_impression_batch(
+        self, target_date: str | None = None
+    ) -> dict[str, dict[str, str]]:
+        """每日自动拉取各群聊天记录并批量分析活跃用户印象。
+
+        Args:
+            target_date: 目标分析日期 (YYYY-MM-DD)，若为 None 则默认取前一天。
+
+        Returns:
+            按群归类的印象生成结果：{group_id: {user_id: impression}}。
+        """
+        if not target_date:
+            target_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        logger.info(f"开始执行每日群活跃用户印象分析批处理: 日期={target_date}")
+        groups = await self.db_manager.get_active_groups_by_date(target_date)
+        if not groups:
+            logger.info(f"日期 {target_date} 没有群发言记录，跳过每日印象分析")
+            return {}
+
+        # 方案 2 (主活跃群决定论)：当开启全局好感度模式时，预先计算每个用户在哪一个群是主活跃群
+        user_primary_group: dict[str, str] = {}
+        if self.is_global_favour:
+            user_activity = await self.db_manager.get_user_activity_across_groups(
+                target_date
+            )
+            for uid, group_chars in user_activity.items():
+                if group_chars:
+                    primary_grp = max(group_chars.items(), key=lambda x: x[1])[0]
+                    user_primary_group[uid] = primary_grp
+
+        provider = self._get_impression_provider()
+        if not provider:
+            logger.error("未找到可用的 LLM Provider，每日印象分析终止")
+            return {}
+
+        total_results: dict[str, dict[str, str]] = {}
+
+        for group_id in groups:
+            if not self._is_favour_session_enabled(group_id):
+                continue
+
+            active_users = await self.db_manager.get_group_active_users_utterances(
+                group_id=group_id,
+                date=target_date,
+                min_msg_count=self.daily_imp_min_messages,
+                min_total_chars=self.daily_imp_min_chars,
+            )
+
+            # 在全局好感度模式下（方案2），若某用户当天在多个群活跃，只在主活跃群中进行分析与更新
+            if self.is_global_favour:
+                active_users = {
+                    uid: data
+                    for uid, data in active_users.items()
+                    if user_primary_group.get(uid) == group_id
+                }
+
+            if not active_users:
+                continue
+
+            existing_impressions = {}
+            for uid in active_users:
+                session_key = "global" if self.is_global_favour else group_id
+                record = await self.db_manager.get_favour(uid, session_key)
+                if record and record.impression:
+                    existing_impressions[uid] = record.impression
+
+            prompt = self._build_group_impression_prompt(
+                group_id=group_id,
+                active_users=active_users,
+                user_existing_impressions=existing_impressions,
+            )
+
+            try:
+                response = await asyncio.wait_for(
+                    provider.text_chat(
+                        contexts=[{"role": "user", "content": prompt}]
+                    ),
+                    timeout=30.0,
+                )
+                parsed_impressions = self._parse_group_impression_json(
+                    response.completion_text or ""
+                )
+
+                group_res = {}
+                for uid, impression in parsed_impressions.items():
+                    if uid in active_users and impression:
+                        session_key = "global" if self.is_global_favour else group_id
+                        await self.db_manager.update_favour(
+                            user_id=uid,
+                            session_id=session_key,
+                            impression=impression,
+                        )
+                        group_res[uid] = impression
+
+                if group_res:
+                    total_results[group_id] = group_res
+                    logger.info(
+                        f"群 {group_id} 印象分析完成，已更新 {len(group_res)} 位成员印象: {group_res}"
+                    )
+            except Exception as e:
+                logger.error(f"群 {group_id} 每日印象分析失败: {e}")
+
+        # 批处理完成后清理 3 天前的过期发言缓冲
+        try:
+            cutoff = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
+            cleaned_count = await self.db_manager.clean_expired_group_utterances(cutoff)
+            if cleaned_count > 0:
+                logger.info(f"已清理 {cleaned_count} 条过期发言缓冲记录 (< {cutoff})")
+        except Exception as e:
+            logger.error(f"清理过期发言记录失败: {e}")
+
+        return total_results
 
     async def _record_completed_dialogue_round(
         self, event: AstrMessageEvent, bot_message: str
@@ -1030,6 +1288,48 @@ class FavourManagerTool(Star):
             event.set_extra("_favour_dialogue_user_id", str(event.get_sender_id()))
             event.set_extra("_favour_dialogue_session_id", session_id)
             event.set_extra("_favour_dialogue_user_message", message.strip())
+
+            # 记录用户群内有效独立发言（用于每日群印象批量分析）
+            if self.enable_daily_impression:
+                try:
+                    group_id = ""
+                    if hasattr(event, "get_group_id"):
+                        group_id = str(event.get_group_id() or "")
+                    if not group_id and getattr(event, "unified_msg_origin", None):
+                        origin = str(event.unified_msg_origin)
+                        if "group" in origin.lower() or ":" in origin:
+                            group_id = origin
+
+                    sender_id = str(event.get_sender_id() or "")
+                    bot_self_id = None
+                    if hasattr(event, "message_obj") and hasattr(event.message_obj, "self_id"):
+                        bot_self_id = str(event.message_obj.self_id)
+
+                    if group_id and sender_id and sender_id != bot_self_id:
+                        if self._is_favour_session_enabled(group_id):
+                            clean_text = (message or "").strip()
+                            if (
+                                len(clean_text) >= 2
+                                and not clean_text.startswith("/")
+                                and not re.match(r"^https?://\S+$", clean_text)
+                                and re.search(r"[\u4e00-\u9fa5a-zA-Z0-9]", clean_text)
+                            ):
+                                if len(clean_text) > 100:
+                                    clean_text = clean_text[:100]
+                                user_name = sender_id
+                                if hasattr(event, "get_sender_name"):
+                                    user_name = event.get_sender_name() or sender_id
+                                date_str = datetime.now().strftime("%Y-%m-%d")
+                                await self.db_manager.record_daily_group_utterance(
+                                    group_id=group_id,
+                                    user_id=sender_id,
+                                    user_name=user_name,
+                                    content=clean_text,
+                                    date=date_str,
+                                    max_daily_count=self.daily_imp_max_user_messages,
+                                )
+                except Exception as ex:
+                    logger.error(f"记录群用户每日发言异常: {ex}")
         except Exception as e:
             logger.error(f"Track natural dialogue message failed: {e}")
 
@@ -1315,7 +1615,7 @@ or [刷分检测：否]
                         dialogue_round_count,
                     )
                     return
-            if impression_refresh_required:
+            if impression_refresh_required and not self.enable_daily_impression:
                 self._schedule_impression_refresh(user_id, session_id)
             return
 
@@ -1395,7 +1695,7 @@ or [刷分检测：否]
                 raise RuntimeError(
                     f"主好感度数据写入失败: user_id={user_id} session_id={session_id}"
                 )
-            if impression_refresh_required:
+            if impression_refresh_required and not self.enable_daily_impression:
                 self._schedule_impression_refresh(user_id, session_id)
 
             # 更新每日好感度变化记录
@@ -2057,5 +2357,65 @@ or [刷分检测：否]
 7. 惩罚状态
    用法: /查询惩罚列表
    说明: 查看当前因刷好感检测进入惩罚期的用户。
+
+8. 每日群印象分析
+   用法: /分析群印象 [日期YYYY-MM-DD]
+   别名: /刷新群印象
+   权限: 管理员及以上
+   说明: 针对当前群拉取聊天记录并批量分析活跃成员印象，默认分析今天。
 """
         yield event.plain_result(msg)
+
+    @filter.command("分析群印象", alias={"刷新群印象"})
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def analyze_group_impression_cmd(
+        self, event: AstrMessageEvent, date_arg: str = ""
+    ):
+        """手动触发分析群活跃成员印象"""
+        group_id = str(event.get_group_id() or event.unified_msg_origin or "")
+        if not group_id:
+            yield event.plain_result("请在群聊中使用此指令，或确保当前会话具有群ID。")
+            return
+
+        target_date = (
+            date_arg.strip()
+            if date_arg.strip()
+            else datetime.now().strftime("%Y-%m-%d")
+        )
+        yield event.plain_result(
+            f"正在分析群 {group_id} 在 {target_date} 的活跃成员印象..."
+        )
+
+        res = await self._run_daily_group_impression_batch(
+            target_date=target_date
+        )
+        group_res = res.get(group_id, {})
+        if not group_res:
+            yield event.plain_result(
+                f"群 {group_id} 在 {target_date} 未发现达到门槛的活跃用户或分析无产出。"
+            )
+        else:
+            lines = [f"📊 群 {group_id} 印象分析完成："]
+            for uid, imp in group_res.items():
+                name = await self._get_user_display_name(event, uid)
+                lines.append(f"- {name} ({uid}): {imp}")
+            yield event.plain_result("\n".join(lines))
+
+    async def terminate(self):
+        """插件卸载或重载时优雅注销定时任务并释放数据库资源。"""
+        try:
+            if hasattr(self.context, "cron_manager"):
+                jobs = await self.context.cron_manager.list_jobs(
+                    job_type="basic"
+                )
+                for job in jobs:
+                    if job.name in [
+                        "daily_group_impression_analysis",
+                        "favour_reset_weekly",
+                    ]:
+                        await self.context.cron_manager.delete_job(job.job_id)
+            if hasattr(self, "db_manager"):
+                await self.db_manager.close()
+            logger.info("astrbot_plugin_Favour_Ultra 资源已成功释放")
+        except Exception as e:
+            logger.error(f"插件 terminate 异常: {e}")

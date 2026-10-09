@@ -141,11 +141,42 @@
                 "hint": "可选。选择用于生成用户印象的 LLM Provider。留空时使用当前默认 Provider。",
                 "_special": "select_provider"
             },
-            "natural_dialogue_rounds": {
-                "description": "自然对话轮数阈值",
-                "type": "int",
-                "default": 8,
-                "hint": "每完成多少轮用户与机器人的实际自然对话后刷新一次印象。只有同一消息事件中的用户输入与最终机器人回复才算一轮；群友之间的相邻发言不计入。"
+            "daily_impression_config": {
+                "description": "每日群活跃用户印象分析配置",
+                "type": "object",
+                "hint": "每日定时拉取各群聊天记录，单群仅调用一次LLM批量分析群内所有活跃成员的印象。",
+                "items": {
+                    "enable_daily_impression": {
+                        "description": "是否启用每日印象分析",
+                        "type": "bool",
+                        "default": true,
+                        "hint": "开启后，每天定时对各群的活跃成员集中分析印象。"
+                    },
+                    "schedule_time": {
+                        "description": "每日执行时间 (HH:MM)",
+                        "type": "string",
+                        "default": "03:30",
+                        "hint": "格式: HH:MM，默认凌晨 03:30 执行。"
+                    },
+                    "min_daily_messages": {
+                        "description": "当日活跃最少发言条数",
+                        "type": "int",
+                        "default": 10,
+                        "hint": "单日有效发言达到此条数的成员才会被纳入分析。"
+                    },
+                    "min_daily_chars": {
+                        "description": "当日活跃最少总字数",
+                        "type": "int",
+                        "default": 50,
+                        "hint": "单日有效发言总字数达到此值的成员也会被纳入分析。"
+                    },
+                    "max_daily_messages_per_user": {
+                        "description": "单人单群每日最大暂存条数",
+                        "type": "int",
+                        "default": 50,
+                        "hint": "每个用户在每个群每日最多暂存的发言条数，防止超出上下文。"
+                    }
+                }
             },
             "penalty_config": {
                 "description": "惩罚机制配置",
