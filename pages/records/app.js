@@ -97,10 +97,23 @@ function renderRows(rows) {
       const avatar = document.createElement("img");
       avatar.src = `https://q1.qlogo.cn/g?b=qq&nk=${encodeURIComponent(row.user_id)}&s=100`;
       avatar.alt = "";
-      const userId = document.createElement("span");
-      userId.className = "user-id";
-      userId.textContent = row.user_id;
-      wrapper.append(avatar, userId);
+
+      const userMeta = document.createElement("div");
+      userMeta.className = "user-meta";
+
+      const userName = document.createElement("span");
+      userName.className = "user-name";
+      userName.textContent = row.nickname || row.user_id;
+
+      userMeta.append(userName);
+      if (row.nickname && row.nickname !== row.user_id) {
+        const userId = document.createElement("span");
+        userId.className = "user-id";
+        userId.textContent = row.user_id;
+        userMeta.append(userId);
+      }
+
+      wrapper.append(avatar, userMeta);
       userCell.append(wrapper);
 
       const favourCell = document.createElement("td");
@@ -215,9 +228,12 @@ async function load() {
 
 function openEditor(row) {
   state.editingRow = row;
+  const userDisplay = row.nickname && row.nickname !== row.user_id
+    ? `${row.nickname} (${row.user_id})`
+    : row.user_id;
   dom.editorSubject.textContent = `${t("session", "会话")}: ${
     state.sessionName
-  } · ${t("colUser", "用户")}: ${row.user_id}`;
+  } · ${t("colUser", "用户")}: ${userDisplay}`;
   dom.editorFavour.value = row.favour;
   dom.editorRelationship.value = row.relationship || "";
   dom.editorImpression.value = row.impression || "";

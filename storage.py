@@ -23,6 +23,7 @@ class FavourRecord(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     user_id: str = Field(index=True)
+    nickname: str = Field(default="")
     session_id: str = Field(
         default="global", index=True
     )  # "global" 表示全局，或者具体的 session_id
@@ -197,6 +198,18 @@ class FavourDBManager:
                         await conn.run_sync(SQLModel.metadata.create_all)
                         logger.info("数据库初始化：创建了 daily_group_utterances 表")
 
+                    # 检查 favour_records 表是否存在 nickname 列
+                    result_fav = await conn.execute(
+                        text("PRAGMA table_info(favour_records)")
+                    )
+                    fav_cols = [row[1] for row in result_fav.fetchall()]
+                    if fav_cols and "nickname" not in fav_cols:
+                        logger.info("favour_records 缺少 nickname 列，执行自动迁移添加...")
+                        await conn.execute(
+                            text("ALTER TABLE favour_records ADD COLUMN nickname TEXT DEFAULT ''")
+                        )
+                        logger.info("favour_records 已添加 nickname 列")
+
                 self._initialized = True
                 logger.info(f"好感度数据库已初始化: {self.db_path}")
             except Exception as e:
@@ -319,6 +332,7 @@ class FavourDBManager:
         interact_count: int | None = None,
         dialogue_round_count: int | None = None,
         impression: str | None = None,
+        nickname: str | None = None,
     ) -> bool:
         """更新好感度记录"""
         await self.init_db()
@@ -346,6 +360,7 @@ class FavourDBManager:
                     calculated_relationship = self._get_relationship(init_favour)
                     record = FavourRecord(
                         user_id=user_id,
+                        nickname=nickname if nickname is not None else "",
                         session_id=sid,
                         favour=init_favour,
                         relationship=calculated_relationship,
@@ -376,6 +391,8 @@ class FavourDBManager:
                         record.dialogue_round_count = dialogue_round_count
                     if impression is not None:
                         record.impression = impression
+                    if nickname is not None and nickname:
+                        record.nickname = nickname
                     record.updated_at = datetime.now(timezone.utc)
                     session.add(record)
 
@@ -495,6 +512,106 @@ class FavourDBManager:
             return [
                 str(session_id) for session_id in result.scalars().all() if session_id
             ]
+
+    async def get_all_utterance_group_ids(self) -> list[str]:
+        """获取所有存在日常发言记录的群号"""
+        await self.init_db()
+        async with self.async_session() as session:
+            stmt = select(DailyGroupUtterance.group_id).distinct()
+            result = await session.execute(stmt)
+            return [str(gid) for gid in result.scalars().all() if gid]
+
+    async def get_users_in_group(self, group_id: str) -> list[str]:
+        """获取某群在群发言表中存在记录的所有用户ID"""
+        await self.init_db()
+        raw_gid = group_id.split(":")[-1] if ":" in group_id else group_id
+        async with self.async_session() as session:
+            stmt = (
+                select(DailyGroupUtterance.user_id)
+                .where(
+                    (DailyGroupUtterance.group_id == group_id)
+                    | (DailyGroupUtterance.group_id == raw_gid)
+                    | (DailyGroupUtterance.group_id.like(f"%{raw_gid}%"))
+                )
+                .distinct()
+            )
+            result = await session.execute(stmt)
+            return [str(uid) for uid in result.scalars().all() if uid]
+
+    async def get_records_by_users(
+        self, user_ids: list[str], session_id: str = "global"
+    ) -> list[FavourRecord]:
+        """获取指定用户列表在某个会话中的好感度记录"""
+        await self.init_db()
+        if not user_ids:
+            return []
+        async with self.async_session() as session:
+            stmt = select(FavourRecord).where(
+                FavourRecord.session_id == session_id,
+                FavourRecord.user_id.in_(user_ids),
+            )
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+
+    async def get_records_for_group(
+        self, group_id: str, is_global: bool = False
+    ) -> list[FavourRecord]:
+        """获取某个群的好感度记录：全局模式下取群成员的全局记录，分群模式下取该群专属记录"""
+        await self.init_db()
+        raw_gid = group_id.split(":")[-1] if ":" in group_id else group_id
+        if is_global:
+            user_ids = await self.get_users_in_group(group_id)
+            if not user_ids:
+                return []
+            return await self.get_records_by_users(user_ids, session_id="global")
+        else:
+            async with self.async_session() as session:
+                stmt = select(FavourRecord).where(
+                    (FavourRecord.session_id == group_id)
+                    | (FavourRecord.session_id == raw_gid)
+                    | (FavourRecord.session_id.like(f"%{raw_gid}%"))
+                )
+                result = await session.execute(stmt)
+                return list(result.scalars().all())
+
+    async def get_user_nicknames_map(self, user_ids: list[str]) -> dict[str, str]:
+        """从 daily_group_utterances 批量提取用户最新非空发言昵称"""
+        await self.init_db()
+        if not user_ids:
+            return {}
+        async with self.async_session() as session:
+            stmt = (
+                select(DailyGroupUtterance.user_id, DailyGroupUtterance.user_name)
+                .where(
+                    DailyGroupUtterance.user_id.in_(user_ids),
+                    DailyGroupUtterance.user_name != "",
+                    DailyGroupUtterance.user_name != DailyGroupUtterance.user_id,
+                )
+                .order_by(DailyGroupUtterance.id.desc())
+            )
+            result = await session.execute(stmt)
+            res_map: dict[str, str] = {}
+            for uid, name in result.all():
+                if uid not in res_map and name:
+                    res_map[str(uid)] = str(name)
+            return res_map
+
+    async def update_user_nickname(self, user_id: str, nickname: str) -> None:
+        """更新指定用户在 favour_records 中的昵称"""
+        if not user_id or not nickname:
+            return
+        await self.init_db()
+        try:
+            async with self.async_session() as session:
+                stmt = (
+                    update(FavourRecord)
+                    .where(FavourRecord.user_id == user_id)
+                    .values(nickname=nickname)
+                )
+                await session.execute(stmt)
+                await session.commit()
+        except Exception as e:
+            logger.debug(f"更新用户昵称失败: {e}")
 
     async def clear_session(self, session_id: str | None = None) -> bool:
         """清空某会话记录"""

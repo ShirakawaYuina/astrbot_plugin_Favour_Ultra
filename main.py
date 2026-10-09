@@ -1684,6 +1684,10 @@ or [刷分检测：否]
                 record.dialogue_round_count if record else 0,
             )
 
+            sender_name = ""
+            if hasattr(event, "get_sender_name"):
+                sender_name = event.get_sender_name() or ""
+
             # 更新数据库
             update_success = await self.db_manager.update_favour(
                 user_id,
@@ -1693,6 +1697,7 @@ or [刷分检测：否]
                 is_unique=False,
                 interact_count=interact_count,
                 dialogue_round_count=dialogue_round_count,
+                nickname=sender_name,
             )
             if not update_success:
                 raise RuntimeError(
