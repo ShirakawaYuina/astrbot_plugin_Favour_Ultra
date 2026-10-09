@@ -33,6 +33,7 @@ class FavourManagerTool(Star):
     daily_imp_min_messages: int = 10
     daily_imp_min_chars: int = 50
     daily_imp_max_user_messages: int = 50
+    impression_provider: str = ""
 
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -66,10 +67,12 @@ class FavourManagerTool(Star):
         self.impression_natural_rounds = max(
             1, adv_conf.get("natural_dialogue_rounds", 8)
         )
-        self.impression_provider = str(
-            adv_conf.get("impression_provider", "") or ""
-        ).strip()
         daily_imp_conf = adv_conf.get("daily_impression_config", {})
+        self.impression_provider = str(
+            daily_imp_conf.get("impression_provider")
+            or adv_conf.get("impression_provider", "")
+            or ""
+        ).strip()
         self.enable_daily_impression = daily_imp_conf.get(
             "enable_daily_impression", True
         )

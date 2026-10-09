@@ -134,13 +134,6 @@
                 "default": [],
                 "hint": "如果此列表不为空，则只有在此列表中的会话才会启用好感度系统。"
             },
-            "impression_provider": {
-                "description": "印象生成专用模型",
-                "type": "string",
-                "default": "",
-                "hint": "可选。选择用于生成用户印象的 LLM Provider。留空时使用当前默认 Provider。",
-                "_special": "select_provider"
-            },
             "daily_impression_config": {
                 "description": "每日群活跃用户印象分析配置",
                 "type": "object",
@@ -151,6 +144,13 @@
                         "type": "bool",
                         "default": true,
                         "hint": "开启后，每天定时对各群的活跃成员集中分析印象。"
+                    },
+                    "impression_provider": {
+                        "description": "印象生成专用模型",
+                        "type": "string",
+                        "default": "",
+                        "hint": "可选。选择用于生成用户印象的 LLM Provider。留空时使用当前默认 Provider。",
+                        "_special": "select_provider"
                     },
                     "schedule_time": {
                         "description": "每日执行时间 (HH:MM)",

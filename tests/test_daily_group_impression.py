@@ -249,3 +249,31 @@ async def test_clean_expired_group_utterances(tmp_path: Path):
     assert groups_new == ["g1"]
 
     await db.close()
+
+
+@pytest.mark.asyncio
+async def test_impression_provider_config_resolution():
+    """测试印象生成专用模型分别在 daily_impression_config 及旧版 advanced_config 下均可正确解析"""
+    # 1. 在 daily_impression_config 内部配置
+    conf1 = {
+        "advanced_config": {
+            "daily_impression_config": {
+                "impression_provider": "ark/deepseek-v4-flash-ga-260731"
+            }
+        }
+    }
+    mock_ctx = MagicMock()
+    mock_ctx.get_config.return_value = {}
+    p1 = FavourManagerTool(mock_ctx, conf1)
+    assert p1.impression_provider == "ark/deepseek-v4-flash-ga-260731"
+
+    # 2. 在旧版 advanced_config 配置（兼容回退）
+    conf2 = {
+        "advanced_config": {
+            "impression_provider": "legacy-provider-id",
+            "daily_impression_config": {}
+        }
+    }
+    p2 = FavourManagerTool(mock_ctx, conf2)
+    assert p2.impression_provider == "legacy-provider-id"
+
