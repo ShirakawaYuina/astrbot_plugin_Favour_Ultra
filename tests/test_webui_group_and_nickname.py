@@ -1,7 +1,9 @@
 import json
-import pytest
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
+import pytest
+from sqlmodel import select
 from astrbot_plugin_Favour_Ultra.storage import FavourDBManager, FavourRecord
 from astrbot_plugin_Favour_Ultra.web_api import FavourWebApi, GLOBAL_SESSION_ID
 
@@ -200,5 +202,69 @@ async def test_build_session_options_aggregation(tmp_path: Path):
     assert "1085132297" in s_ids_all
     assert "6666" not in s_ids_all  # 黑名单依然生效
     assert "1158662154" not in s_ids_all  # 私聊依然彻底排除
+
+    await db.close()
+
+
+@pytest.mark.asyncio
+async def test_record_updated_at_local_timezone_and_sorting(tmp_path: Path):
+    """测试更新时间使用本地时间存储并在 WebUI 列表中正常格式化与降序排序。"""
+    db = FavourDBManager(data_dir=tmp_path)
+    await db.init_db()
+
+    # 1. 模拟写入两条记录，更新时间均为本地时间
+    await db.update_favour("u_old", "global", favour=10, impression="旧印象")
+    # 手动让旧记录早 1 小时
+    async with db.async_session() as session:
+        stmt = select(FavourRecord).where(FavourRecord.user_id == "u_old")
+        rec = (await session.execute(stmt)).scalars().first()
+        rec.updated_at = datetime.now() - timedelta(hours=1)
+        session.add(rec)
+        await session.commit()
+
+    # 2. 模拟刚刚更新的新印象
+    await db.update_favour("u_new", "global", favour=20, impression="最新印象")
+
+    mock_plugin = MagicMock()
+    mock_plugin.db_manager = db
+    mock_plugin.is_global_favour = True
+    mock_plugin._get_daily_favour_change.return_value = 0
+
+    api = FavourWebApi(mock_plugin)
+    api._get_platform_bot = lambda: None
+
+    from astrbot.api.web import _request_var
+
+    class FakeQuery(dict):
+        def get(self, key, default=None, type=None):
+            val = super().get(key, default)
+            if type and val is not None:
+                try:
+                    return type(val)
+                except Exception:
+                    return default
+            return val
+
+    class FakeReq:
+        def __init__(self, query_dict):
+            self.query = FakeQuery(query_dict)
+
+    # 按更新时间降序查询
+    _request_var.set(
+        FakeReq({"session_id": "global", "sort_by": "updated_at", "sort_desc": True, "page": 1, "page_size": 10})
+    )
+    resp = await api.list_records()
+    body = json.loads(resp.body)
+
+    rows = body["rows"]
+    assert len(rows) == 2
+    # 最新更新的记录应排在第 1 位
+    assert rows[0]["user_id"] == "u_new"
+    assert rows[0]["impression"] == "最新印象"
+    assert rows[1]["user_id"] == "u_old"
+
+    # 时间格式为 YYYY-MM-DD HH:MM
+    now_prefix = datetime.now().strftime("%Y-%m-%d")
+    assert rows[0]["updated_at"].startswith(now_prefix)
 
     await db.close()

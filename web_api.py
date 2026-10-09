@@ -151,10 +151,18 @@ class FavourWebApi:
                     "interact_count": int(record.interact_count or 0),
                     "dialogue_round_count": int(record.dialogue_round_count or 0),
                     "today_change": self.plugin._get_daily_favour_change(uid),
-                    "created_at": record.created_at.strftime("%Y-%m-%d %H:%M")
+                    "created_at": (
+                        record.created_at.strftime("%Y-%m-%d %H:%M")
+                        if hasattr(record.created_at, "strftime")
+                        else str(record.created_at or "")[:16]
+                    )
                     if record.created_at
                     else "",
-                    "updated_at": record.updated_at.strftime("%Y-%m-%d %H:%M")
+                    "updated_at": (
+                        record.updated_at.strftime("%Y-%m-%d %H:%M")
+                        if hasattr(record.updated_at, "strftime")
+                        else str(record.updated_at or "")[:16]
+                    )
                     if record.updated_at
                     else "",
                 }

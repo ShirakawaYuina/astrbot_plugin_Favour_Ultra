@@ -1,12 +1,12 @@
 # storage.py
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 from aiofiles import open as aio_open
 from aiofiles.os import path as aio_path
-from sqlalchemy import text
+from sqlalchemy import DateTime, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import Field, SQLModel, delete, select, update
@@ -33,8 +33,8 @@ class FavourRecord(SQLModel, table=True):
     dialogue_round_count: int = Field(default=0)
     impression: str = Field(default="")
     is_unique: bool = Field(default=False)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=datetime.now, sa_type=DateTime)
+    updated_at: datetime = Field(default_factory=datetime.now, sa_type=DateTime)
 
 
 class DailyFavourChange(SQLModel, table=True):
@@ -45,8 +45,8 @@ class DailyFavourChange(SQLModel, table=True):
     user_id: str = Field(index=True)
     date: str = Field(index=True)  # 格式: YYYY-MM-DD
     change: int = Field(default=0)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=datetime.now, sa_type=DateTime)
+    updated_at: datetime = Field(default_factory=datetime.now, sa_type=DateTime)
 
 
 class DailyGroupUtterance(SQLModel, table=True):
@@ -59,7 +59,7 @@ class DailyGroupUtterance(SQLModel, table=True):
     user_name: str = Field(default="")
     date: str = Field(index=True)  # 格式: YYYY-MM-DD
     content: str = Field(default="", max_length=300)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=datetime.now, sa_type=DateTime)
 
 
 class FavourDBManager:
@@ -393,7 +393,7 @@ class FavourDBManager:
                         record.impression = impression
                     if nickname is not None and nickname:
                         record.nickname = nickname
-                    record.updated_at = datetime.now(timezone.utc)
+                    record.updated_at = datetime.now()
                     session.add(record)
 
                 await session.commit()
@@ -427,14 +427,14 @@ class FavourDBManager:
                         max_favour = 100 if user_id == "1158662154" else 99
                         record.favour = max(self.min_val, min(max_favour, favour))
                         record.relationship = self._get_relationship(record.favour)
-                        record.updated_at = datetime.now(timezone.utc)
+                        record.updated_at = datetime.now()
                         session.add(record)
 
                     await session.commit()
                     return len(records)
                 else:
                     # 构建更新字典
-                    values = {"updated_at": datetime.now(timezone.utc)}
+                    values = {"updated_at": datetime.now()}
                     if relationship is not None:
                         values["relationship"] = relationship
                     if is_unique is not None:
@@ -673,7 +673,7 @@ class FavourDBManager:
                     )
                 else:
                     record.change = change
-                    record.updated_at = datetime.now(timezone.utc)
+                    record.updated_at = datetime.now()
 
                 session.add(record)
                 await session.commit()
@@ -706,7 +706,7 @@ class FavourDBManager:
                 stmt = (
                     update(FavourRecord)
                     .where(FavourRecord.favour < 0)
-                    .values(favour=0, updated_at=datetime.now(timezone.utc))
+                    .values(favour=0, updated_at=datetime.now())
                 )
                 result = await session.execute(stmt)
                 await session.commit()
