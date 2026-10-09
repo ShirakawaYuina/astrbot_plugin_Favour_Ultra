@@ -97,6 +97,9 @@ class FavourManagerTool(Star):
         self.daily_imp_max_user_messages = daily_imp_conf.get(
             "max_daily_messages_per_user", 50
         )
+        self.daily_imp_timeout = max(
+            10, int(daily_imp_conf.get("timeout", 180) or 180)
+        )
 
         # 惩罚机制配置
         penalty_conf = adv_conf.get("penalty_config", {})
@@ -691,12 +694,15 @@ class FavourManagerTool(Star):
                 user_existing_impressions=existing_impressions,
             )
 
+            timeout_seconds = float(
+                getattr(self, "daily_imp_timeout", 180) or 180
+            )
             try:
                 response = await asyncio.wait_for(
                     provider.text_chat(
                         contexts=[{"role": "user", "content": prompt}]
                     ),
-                    timeout=30.0,
+                    timeout=timeout_seconds,
                 )
                 parsed_impressions = self._parse_group_impression_json(
                     response.completion_text or ""
@@ -718,8 +724,14 @@ class FavourManagerTool(Star):
                     logger.info(
                         f"群 {group_id} 印象分析完成，已更新 {len(group_res)} 位成员印象: {group_res}"
                     )
+            except (asyncio.TimeoutError, TimeoutError):
+                logger.error(
+                    f"群 {group_id} 每日印象分析失败: 大模型调用超时 (超过 {int(timeout_seconds)} 秒)，建议在配置中调大 daily_impression_config.timeout 或更换响应更快的模型"
+                )
             except Exception as e:
-                logger.error(f"群 {group_id} 每日印象分析失败: {e}")
+                logger.error(
+                    f"群 {group_id} 每日印象分析失败: {type(e).__name__}: {e or '未知错误'}"
+                )
 
         # 批处理完成后清理 3 天前的过期发言缓冲
         try:

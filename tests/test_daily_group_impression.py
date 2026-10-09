@@ -277,3 +277,61 @@ async def test_impression_provider_config_resolution():
     p2 = FavourManagerTool(mock_ctx, conf2)
     assert p2.impression_provider == "legacy-provider-id"
 
+
+@pytest.mark.asyncio
+async def test_daily_impression_timeout_config_resolution():
+    """测试单群大模型分析超时时间配置解析"""
+    mock_ctx = MagicMock()
+    mock_ctx.get_config.return_value = {}
+
+    # 1. 默认超时时间 180 秒
+    conf_default = {"advanced_config": {"daily_impression_config": {}}}
+    p1 = FavourManagerTool(mock_ctx, conf_default)
+    assert p1.daily_imp_timeout == 180
+
+    # 2. 自定义超时时间 240 秒
+    conf_custom = {
+        "advanced_config": {
+            "daily_impression_config": {
+                "timeout": 240
+            }
+        }
+    }
+    p2 = FavourManagerTool(mock_ctx, conf_custom)
+    assert p2.daily_imp_timeout == 240
+
+
+@pytest.mark.asyncio
+async def test_daily_impression_timeout_error_handling(tmp_path: Path):
+    """测试大模型调用超时时优雅捕获并不中断批处理流程"""
+    db = FavourDBManager(data_dir=tmp_path)
+    date_str = "2026-10-09"
+
+    for i in range(12):
+        await db.record_daily_group_utterance(
+            "group-timeout", "u1", "用户", "超时测试发言", date_str
+        )
+
+    plugin = FavourManagerTool.__new__(FavourManagerTool)
+    plugin.is_global_favour = True
+    plugin.daily_imp_min_messages = 10
+    plugin.daily_imp_min_chars = 40
+    plugin.daily_imp_timeout = 0.05  # 设置极短超时 0.05s
+    plugin.db_manager = db
+    plugin._is_favour_session_enabled = lambda _sid: True
+
+    # 模拟大模型慢调用（触发超时）
+    async def slow_chat(*args, **kwargs):
+        await asyncio.sleep(0.5)
+        return SimpleNamespace(completion_text="{}")
+
+    mock_provider = MagicMock()
+    mock_provider.text_chat = slow_chat
+    plugin._get_impression_provider = lambda: mock_provider
+
+    res = await plugin._run_daily_group_impression_batch(target_date=date_str)
+    # 超时应被安全捕获，返回空字典而不会向上抛出异常崩溃
+    assert res == {}
+
+    await db.close()
+
