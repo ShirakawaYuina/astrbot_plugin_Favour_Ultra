@@ -144,6 +144,10 @@ class FavourManagerTool(Star):
             r"[\[［][^\[\]［］]*?(?:好.*?感|好.*?度|感.*?度)[^\[\]［］]*?[\]］]",
             re.DOTALL | re.IGNORECASE,
         )
+        self.spam_pattern = re.compile(
+            r"[\[［][^\[\]［］]*?(?:刷分|防刷)[^\[\]［］]*?[\]］]",
+            re.DOTALL | re.IGNORECASE,
+        )
         self.relationship_pattern = re.compile(
             r"[\[［]\s*用户申请确认关系\s*[:：]\s*(.*?)\s*[:：]\s*(true|false)(?:\s*[:：]\s*(true|false))?\s*[\]］]",
             re.IGNORECASE,
@@ -406,8 +410,12 @@ class FavourManagerTool(Star):
                 if isinstance(comp, Plain) and comp.text:
                     text = comp.text
                     text = self.favour_pattern.sub("", text)
-                    text = re.sub(r"\[刷分检测：(?:是|否)\]", "", text)
-                    text = re.sub(r"\[印象：[^\]]+\]", "", text)
+                    spam_re = getattr(self, "spam_pattern", None)
+                    if spam_re:
+                        text = spam_re.sub("", text)
+                    else:
+                        text = re.sub(r"[\[［][^\[\]［］]*?(?:刷分|防刷)[^\[\]［］]*?[\]］]", "", text)
+                    text = re.sub(r"[\[［][^\[\]［］]*?印象[^\[\]［］]*?[\]］]", "", text)
                     text = self.relationship_pattern.sub("", text)
                     text = text.strip()
                     if text:
@@ -1593,9 +1601,14 @@ or [刷分检测：否]
                 update_data["found"] = True
 
         # 提取刷分检测结果
-        spam_match = re.search(r"\[刷分检测：(是|否)\]", text)
+        spam_match = re.search(
+            r"[\[［]\s*(?:刷分|防刷)(?:检测)?\s*[:：]?\s*(是|否|true|false|yes|no|有|无|正常)?\s*[\]］]",
+            text,
+            re.IGNORECASE,
+        )
         if spam_match:
-            update_data["is_spam"] = spam_match.group(1) == "是"
+            val = (spam_match.group(1) or "").lower()
+            update_data["is_spam"] = val in ("是", "true", "yes", "有")
 
         if update_data["found"]:
             self.pending_updates[msg_id] = update_data
@@ -1615,8 +1628,12 @@ or [刷分检测：否]
             if isinstance(comp, Plain) and comp.text:
                 # 清理所有特殊标签
                 t = self.favour_pattern.sub("", comp.text)
-                t = re.sub(r"\[刷分检测：(是|否)\]", "", t)
-                t = re.sub(r"\[印象：[^\]]+\]", "", t)
+                spam_re = getattr(self, "spam_pattern", None)
+                if spam_re:
+                    t = spam_re.sub("", t)
+                else:
+                    t = re.sub(r"[\[［][^\[\]［］]*?(?:刷分|防刷)[^\[\]［］]*?[\]］]", "", t)
+                t = re.sub(r"[\[［][^\[\]［］]*?印象[^\[\]［］]*?[\]］]", "", t)
                 t = self.relationship_pattern.sub("", t)
                 # 清理空行
                 t = "\n".join([line for line in t.split("\n") if line.strip()])

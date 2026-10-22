@@ -45,6 +45,7 @@ def _build_plugin() -> FavourManagerTool:
     plugin.allowed_sessions = []
     plugin.blocked_sessions = []
     plugin.favour_pattern = re.compile(r"\[好感度(?:上升：\d+|降低：\d+|持平)\]")
+    plugin.spam_pattern = re.compile(r"[\[［][^\[\]［］]*?(?:刷分|防刷)[^\[\]［］]*?[\]］]")
     plugin.relationship_pattern = re.compile(r"$^")
     plugin.is_global_favour = False
     plugin.db_manager = SimpleNamespace(
@@ -302,3 +303,41 @@ def test_impression_prompt_requires_user_only_repetition_evidence() -> None:
     assert "至少3轮" in prompt
     assert "当前好感度" not in prompt
     assert "当前关系" not in prompt
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tag,is_spam",
+    [
+        ("[刷分检测：否]", False),
+        ("[刷分检测:否]", False),
+        ("[刷分检测: 否]", False),
+        ("[刷分检测]", False),
+        ("［刷分检测：否］", False),
+        ("[刷分检测:是]", True),
+        ("[刷分检测: 是]", True),
+        ("[防刷检测: true]", True),
+    ],
+)
+async def test_spam_detection_tag_is_always_stripped_and_parsed(tag: str, is_spam: bool) -> None:
+    plugin = _build_plugin()
+    plugin._mark_dialogue_round_for_user = AsyncMock(return_value=False)
+    event = _DialogueEvent(
+        user_id="100",
+        session_id="group-1",
+        message="你好",
+    )
+    raw_reply = f"正常回复内容\n[好感度持平]\n{tag}"
+    event._result.chain = [Plain(raw_reply)]
+
+    await plugin.track_natural_dialogue_message(event)
+    await plugin.handle_llm_response(
+        event,
+        SimpleNamespace(completion_text=raw_reply),
+    )
+    msg_id = str(event.message_obj.message_id)
+    assert plugin.pending_updates[msg_id]["is_spam"] == is_spam
+
+    await plugin.update_data(event)
+    assert event._result.chain[0].text == "正常回复内容"
+    assert "刷分" not in event._result.chain[0].text
