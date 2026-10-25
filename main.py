@@ -948,13 +948,15 @@ class FavourManagerTool(Star):
                     self.min_favour_value, min(self.max_favour_value, global_rec.favour)
                 )
 
-        is_envoy = str(user_id) in [str(e) for e in self.favour_envoys]
+        is_envoy = str(user_id) in [str(e) for e in getattr(self, "favour_envoys", [])]
         is_admin = await self._check_permission(event, PermLevel.OWNER)
 
-        base = (
-            self.admin_default_favour if (is_envoy or is_admin) else self.default_favour
-        )
-        return max(self.min_favour_value, min(self.max_favour_value, base))
+        admin_default = getattr(self, "admin_default_favour", 50)
+        user_default = getattr(self, "default_favour", 0)
+        base = admin_default if (is_envoy or is_admin) else user_default
+        min_val = getattr(self, "min_favour_value", -100)
+        max_val = getattr(self, "max_favour_value", 100)
+        return max(min_val, min(max_val, base))
 
     async def _is_spam_behavior(
         self, user_id: str, message: str, event: AstrMessageEvent
@@ -1656,18 +1658,22 @@ class FavourManagerTool(Star):
 最近消息（{self.spam_detection_time_window} 秒内）：
 {recent_messages_text}
 
-输出格式：
-1. 先输出正常回复正文
-2. 然后单独一行输出一个好感度标签，只能三选一：
+【输出格式强制要求】：
+1. 先正常回复用户的最新消息（保持人设口吻）；
+2. 回复正文完成后，必须单独换一行输出好感度变动标签（必须三选一，若无明显变动必须输出 [好感度持平]，严禁省略该标签）：
 [好感度上升：X]
 or [好感度降低：Y]
 or [好感度持平]
-3. 最后单独一行输出一个刷分标签：
+3. 接着单独换一行输出刷分检测标签：
 [刷分检测：是]
 or [刷分检测：否]
-4. 不要输出 `[印象：...]`
+4. 严禁输出 `[印象：...]`，不要暴露任何推理说明，严格确保末尾标签完整。
 """
-            req.system_prompt = f"{prompt_final}\n{req.system_prompt}".strip()
+            existing_sp = (getattr(req, "system_prompt", None) or "").strip()
+            if existing_sp:
+                req.system_prompt = f"{existing_sp}\n\n{prompt_final}".strip()
+            else:
+                req.system_prompt = prompt_final
         except Exception as e:
             logger.error(
                 f"Inject favour prompt failed: {str(e)}\n{traceback.format_exc()}"
@@ -1722,7 +1728,10 @@ or [刷分检测：否]
         if update_data["found"]:
             self.pending_updates[msg_id] = update_data
         elif text and len(text.strip()) > 0:
-            logger.warning(f"LLM回复了内容但未识别到好感度标签 (MsgID: {msg_id})")
+            # 优雅兜底：若 LLM 偶尔漏附标签，自动按“好感度持平”处理，由 update_data 保持原好感不变并持久化对话轮次
+            logger.debug(
+                f"LLM回复未显式包含好感度标签，自动按好感度持平处理 (MsgID: {msg_id})"
+            )
 
     @filter.on_decorating_result(priority=10)
     async def update_data(self, event: AstrMessageEvent):

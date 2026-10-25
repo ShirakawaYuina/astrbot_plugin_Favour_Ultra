@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -67,6 +68,23 @@ def _build_test_plugin() -> FavourManagerTool:
     plugin.enable_relationship_table = False
     plugin.favour_mode = "galgame"
     plugin.spam_detection_time_window = 60
+    plugin.default_favour = 0
+    plugin.admin_default_favour = 50
+    plugin.favour_envoys = []
+    plugin.pending_updates = {}
+    plugin.pending_dialogue_round_updates = {}
+    plugin.user_dialogue_rounds = {}
+    plugin.impression_refresh_locks = set()
+    plugin.impression_natural_rounds = 3
+    plugin.favour_pattern = re.compile(
+        r"[\[［][^\[\]［］]*?(?:好.*?感|好.*?度|感.*?度)[^\[\]［］]*?[\]］]",
+        re.DOTALL | re.IGNORECASE,
+    )
+    plugin.spam_pattern = re.compile(
+        r"[\[［][^\[\]［］]*?(?:刷分|防刷)[^\[\]［］]*?[\]］]",
+        re.DOTALL | re.IGNORECASE,
+    )
+    plugin.relationship_pattern = re.compile(r"$^")
     plugin._is_favour_session_enabled = lambda _sid: True
     plugin._get_session_id = lambda event: getattr(event, "_session_id", "group-1")
     plugin._get_daily_favour_change = lambda _uid: 0
@@ -373,5 +391,47 @@ async def test_webui_aliases_api(tmp_path: Path):
         assert body_kw["rows"][0]["user_id"] == "1001"
     finally:
         _request_var.reset(token)
+
+    await db.close()
+
+
+@pytest.mark.asyncio
+async def test_favour_prompt_postposition_and_fallback(tmp_path: Path):
+    db = FavourDBManager(tmp_path)
+    await db.init_db()
+
+    plugin = _build_test_plugin()
+    plugin.db_manager = db
+    plugin._is_favour_session_enabled = lambda _sid: True
+
+    # 1. 验证 prompt 后置：既有人设保持在最前端，好感度输出要求追加在最后
+    event = _DialogueEvent(user_id="1001", session_id="group-1", message="你好")
+    req = SimpleNamespace(system_prompt="【初始系统人设：猫娘助手】")
+    await plugin.inject_favour_prompt(event, req)
+
+    assert req.system_prompt.startswith("【初始系统人设：猫娘助手】")
+    assert "【输出格式强制要求】" in req.system_prompt
+    assert req.system_prompt.endswith("严格确保末尾标签完整。")
+
+    # 2. 验证缺失好感度标签时的优雅兜底
+    fake_event = _DialogueEvent(
+        user_id="1001",
+        session_id="group-1",
+        message="你好呀",
+    )
+    fake_resp = SimpleNamespace(
+        completion_text="免费41万钻，这得攒到猴年马月，你先打通我请你吃牛肉饭"
+    )
+
+    await plugin.handle_llm_response(fake_event, fake_resp)
+
+    # 验证未捕获标签时未放入待修改队列，避免错误增减分
+    assert str(fake_event.message_obj.message_id) not in plugin.pending_updates
+
+    # 验证 update_data 能够优雅平稳流转，好感度保持原样持平
+    await plugin.update_data(fake_event)
+    rec = await db.get_favour("1001", "group-1")
+    # 原好感应保持不变
+    assert rec is None or rec.favour == 0
 
     await db.close()
