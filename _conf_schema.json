@@ -3,20 +3,28 @@
         "description": "好感度判定模式",
         "type": "string",
         "default": "galgame",
-        "options": ["galgame", "realistic"],
+        "options": [
+            "galgame",
+            "realistic"
+        ],
         "hint": "Galgame 模式：好感度更容易提升，性格更宽容。\n拟真模式：好感度提升更严格，性格更复杂，更难取悦。"
     },
     "is_global_favour": {
         "description": "是否使用全局好感度模式",
         "type": "bool",
         "default": false,
-        "hint": "开启时所有对话共享同一份好感度；关闭时每个会话独立计算。\n目前开启全局模式后，独立会话好感度不会同步，用于防止刷分。"
+        "hint": "开启时所有对话共享同一份好感度，关闭时按每个会话独立计算。"
     },
     "group_sort_by": {
         "description": "群组好感度排序方式",
         "type": "string",
         "default": "default",
-        "options": ["default", "favour", "nickname", "userid"],
+        "options": [
+            "default",
+            "favour",
+            "nickname",
+            "userid"
+        ],
         "hint": "default：按添加时间排序\nfavour：按好感度从高到低排序\nnickname：按昵称 A-Z 排序\nuserid：按用户 ID 排序"
     },
     "enable_relationship_table": {
@@ -59,14 +67,20 @@
         "description": "好感度图片模板",
         "type": "string",
         "default": "default",
-        "options": ["default", "style2"],
+        "options": [
+            "default",
+            "style2"
+        ],
         "hint": "选择生成好感度图片时使用的模板。"
     },
     "image_send_mode": {
         "description": "图片发送模式",
         "type": "string",
         "default": "base64",
-        "options": ["base64", "url"],
+        "options": [
+            "base64",
+            "url"
+        ],
         "hint": "base64 保持原有事件图片发送方式；url 会通过 AstrBot 文件服务生成 HTTP 图片链接，并直接通过 OneBot 发送，适合 aiocqhttp。"
     },
     "image_send_url_base": {
@@ -78,7 +92,7 @@
     "advanced_config": {
         "description": "高级配置",
         "type": "object",
-        "hint": "包含数值波动范围、管理员设置、黑白名单和惩罚机制等高级选项。",
+        "hint": "数值范围、别名开关、黑名单等高级选项。",
         "items": {
             "admin_default_favour": {
                 "description": "框架管理员或特使的初始好感度",
@@ -187,49 +201,6 @@
                         "type": "int",
                         "default": 180,
                         "hint": "单群批量调用大模型分析活跃成员印象的超时等待时间（秒）。群成员较多或使用深思考模型时建议设为 120~300 秒，默认 180 秒。"
-                    }
-                }
-            },
-            "penalty_config": {
-                "description": "惩罚机制配置",
-                "type": "object",
-                "hint": "用于配置刷分行为的检测和惩罚规则。",
-                "items": {
-                    "enable_penalty": {
-                        "description": "是否启用惩罚机制",
-                        "type": "bool",
-                        "default": true,
-                        "hint": "开启后会检测并惩罚刷分行为。"
-                    },
-                    "penalty_whitelist": {
-                        "description": "惩罚白名单",
-                        "type": "list",
-                        "default": [],
-                        "hint": "白名单中的用户 ID 不会触发刷好感检测。一行一个，回车确认。"
-                    },
-                    "use_llm_for_spam_detection": {
-                        "description": "是否使用 LLM 复核刷分行为",
-                        "type": "bool",
-                        "default": true,
-                        "hint": "开启后，会调用 LLM 分析用户行为来判断是否存在刷好感度行为。注意这会增加 API 调用开销。"
-                    },
-                    "spam_detection_message_count": {
-                        "description": "刷分检测消息上下文数量",
-                        "type": "int",
-                        "default": 10,
-                        "hint": "LLM 复核时使用的最近消息记录数量。"
-                    },
-                    "spam_detection_time_window": {
-                        "description": "刷分检测时间窗口（秒）",
-                        "type": "int",
-                        "default": 60,
-                        "hint": "LLM 复核时分析的时间窗口，默认 60 秒。"
-                    },
-                    "penalty_duration": {
-                        "description": "惩罚持续时间（分钟）",
-                        "type": "int",
-                        "default": 5,
-                        "hint": "检测到刷好感行为后的惩罚持续时间，在此期间好感度无法上涨。"
                     }
                 }
             }

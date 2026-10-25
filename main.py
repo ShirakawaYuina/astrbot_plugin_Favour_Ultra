@@ -124,24 +124,6 @@ class FavourManagerTool(Star):
             10, int(daily_imp_conf.get("timeout", 180) or 180)
         )
 
-        # 惩罚机制配置
-        penalty_conf = adv_conf.get("penalty_config", {})
-        self.enable_penalty = penalty_conf.get("enable_penalty", True)
-        self.penalty_whitelist = penalty_conf.get("penalty_whitelist", [])
-        self.use_llm_for_spam_detection = penalty_conf.get(
-            "use_llm_for_spam_detection", True
-        )
-        self.spam_detection_message_count = penalty_conf.get(
-            "spam_detection_message_count", 10
-        )
-        self.spam_detection_time_window = penalty_conf.get(
-            "spam_detection_time_window", 60
-        )
-
-        # 惩罚持续时间（统一为5分钟）
-        self.penalty_duration = penalty_conf.get("penalty_duration", 5)
-
-        self._validate_config()
 
         # 权限管理初始化
         self.admins_id = context.get_config().get("admins_id", [])
@@ -177,14 +159,6 @@ class FavourManagerTool(Star):
         )
 
         self.pending_updates = {}
-
-        # 防刷检测相关
-        self.user_messages: dict[
-            str, list[tuple[datetime, str]]
-        ] = {}  # 记录用户消息：{user_id: [(timestamp, message), ...]}
-        self.penalty_records: dict[
-            str, dict
-        ] = {}  # 惩罚记录：{user_id: {level: str, expires: datetime}}
 
         # 每日好感度限制
         self.daily_favour_changes: dict[
@@ -958,16 +932,6 @@ class FavourManagerTool(Star):
         max_val = getattr(self, "max_favour_value", 100)
         return max(min_val, min(max_val, base))
 
-    async def _is_spam_behavior(
-        self, user_id: str, message: str, event: AstrMessageEvent
-    ) -> tuple[bool, float | None]:
-        """已停用刷分检测机制"""
-        return False, None
-
-    async def _apply_penalty(self, user_id: str, session_id: str):
-        """已停用惩罚机制"""
-        return
-
     def _get_daily_favour_change(self, user_id: str) -> int:
         """获取用户今日好感度变化"""
         today = datetime.now().strftime("%Y-%m-%d")
@@ -1529,7 +1493,6 @@ or [好感度持平]
         update_data = {
             "change": 0,
             "found": False,
-            "is_spam": False,
         }
 
         # 提取好感度变化
@@ -1549,16 +1512,6 @@ or [好感度持平]
             elif "持平" in m:
                 update_data["change"] = 0
                 update_data["found"] = True
-
-        # 提取刷分检测结果
-        spam_match = re.search(
-            r"[\[［]\s*(?:刷分|防刷)(?:检测)?\s*[:：]?\s*(是|否|true|false|yes|no|有|无|正常)?\s*[\]］]",
-            text,
-            re.IGNORECASE,
-        )
-        if spam_match:
-            val = (spam_match.group(1) or "").lower()
-            update_data["is_spam"] = val in ("是", "true", "yes", "有")
 
         if update_data["found"]:
             self.pending_updates[msg_id] = update_data
@@ -2351,7 +2304,6 @@ or [好感度持平]
         msg.append("- 好感度 [@用户]")
         msg.append("- 当前好感度 [页码]")
         msg.append("- 全局好感度 [页码]")
-        msg.append("- 查询惩罚列表")
         msg.append("- 好感度指令帮助")
 
         if is_admin or is_superuser:
@@ -2373,11 +2325,6 @@ or [好感度持平]
             msg.append("- 清空全局好感度")
 
         yield event.plain_result("\n".join(msg))
-
-    @filter.command("查询惩罚列表")
-    async def query_penalty_list(self, event: AstrMessageEvent):
-        """查询当前在惩罚期的用户列表"""
-        yield event.plain_result("刷分检测与惩罚机制已被移除。")
 
     @filter.command("好感度指令帮助")
     async def help_usage(self, event: AstrMessageEvent):
@@ -2421,11 +2368,7 @@ or [好感度持平]
    示例: /跨会话修改 group:123456 修改好感度 10001 50
    说明: /全部好感度 查询非全局会话记录；/清空全局好感度 会清空数据库全部记录。
 
-7. 惩罚状态
-   用法: /查询惩罚列表
-   说明: 查看当前因刷好感检测进入惩罚期的用户。
-
-8. 每日群印象分析
+7. 每日群印象分析
    用法: /分析群印象 [日期YYYY-MM-DD]
    别名: /刷新群印象
    权限: 管理员及以上

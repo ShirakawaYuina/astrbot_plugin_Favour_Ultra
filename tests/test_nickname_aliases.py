@@ -61,13 +61,9 @@ def _build_test_plugin() -> FavourManagerTool:
     plugin.favour_increase_max = 3
     plugin.favour_decrease_min = 1
     plugin.favour_decrease_max = 5
-    plugin.enable_penalty = False
-    plugin.penalty_records = {}
-    plugin.user_messages = {}
     plugin.favour_rule_prompt = ""
     plugin.enable_relationship_table = False
     plugin.favour_mode = "galgame"
-    plugin.spam_detection_time_window = 60
     plugin.default_favour = 0
     plugin.admin_default_favour = 50
     plugin.favour_envoys = []

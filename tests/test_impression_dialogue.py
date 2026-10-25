@@ -263,7 +263,6 @@ async def test_normal_favour_update_does_not_overwrite_impression() -> None:
     plugin.min_favour_value = -100
     plugin.max_favour_value = 100
     plugin.max_daily_increase = 20
-    plugin.penalty_records = {}
     plugin._is_within_daily_limit = lambda _user_id, _change: True
     plugin._get_daily_favour_change = lambda _user_id: 0
     plugin._update_daily_favour_change = AsyncMock()
@@ -307,19 +306,19 @@ def test_impression_prompt_requires_user_only_repetition_evidence() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "tag,is_spam",
+    "tag",
     [
-        ("[刷分检测：否]", False),
-        ("[刷分检测:否]", False),
-        ("[刷分检测: 否]", False),
-        ("[刷分检测]", False),
-        ("［刷分检测：否］", False),
-        ("[刷分检测:是]", True),
-        ("[刷分检测: 是]", True),
-        ("[防刷检测: true]", True),
+        "[刷分检测：否]",
+        "[刷分检测:否]",
+        "[刷分检测: 否]",
+        "[刷分检测]",
+        "［刷分检测：否］",
+        "[刷分检测:是]",
+        "[刷分检测: 是]",
+        "[防刷检测: true]",
     ],
 )
-async def test_spam_detection_tag_is_always_stripped_and_parsed(tag: str, is_spam: bool) -> None:
+async def test_spam_detection_tag_is_always_stripped(tag: str) -> None:
     plugin = _build_plugin()
     plugin._mark_dialogue_round_for_user = AsyncMock(return_value=False)
     event = _DialogueEvent(
@@ -335,8 +334,6 @@ async def test_spam_detection_tag_is_always_stripped_and_parsed(tag: str, is_spa
         event,
         SimpleNamespace(completion_text=raw_reply),
     )
-    msg_id = str(event.message_obj.message_id)
-    assert plugin.pending_updates[msg_id]["is_spam"] == is_spam
 
     await plugin.update_data(event)
     assert event._result.chain[0].text == "正常回复内容"
