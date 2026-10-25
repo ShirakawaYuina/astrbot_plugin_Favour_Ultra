@@ -961,142 +961,12 @@ class FavourManagerTool(Star):
     async def _is_spam_behavior(
         self, user_id: str, message: str, event: AstrMessageEvent
     ) -> tuple[bool, float | None]:
-        """检测是否为刷分行为
-        返回: (是否为刷分行为, 剩余惩罚时间(分钟))
-        """
-
-        if not self.enable_penalty:
-            return False, None
-
-        # 检查用户是否在白名单中
-        if str(user_id) in [str(uid) for uid in self.penalty_whitelist]:
-            logger.info(f"用户 {user_id} 在惩罚白名单中，跳过刷分检测")
-            return False, None
-
-        now = datetime.now()
-        user_key = user_id
-
-        # 检查是否在惩罚期内
-        if user_key in self.penalty_records:
-            penalty = self.penalty_records[user_key]
-            if now < penalty["expires"]:
-                remaining = (penalty["expires"] - now).total_seconds() / 60
-                logger.info(
-                    f"用户 {user_id} 仍在惩罚期内，剩余时间：{remaining:.1f}分钟"
-                )
-                # 惩罚期间内不进行LLM复核，返回False让用户继续互动
-                return False, None
-            else:
-                del self.penalty_records[user_key]
-                logger.info(f"用户 {user_id} 惩罚期结束")
-
-        # 检查消息是否@了机器人
-        is_at_bot = False
-        # 检查is_at_or_wake_command属性
-        if hasattr(event, "is_at_or_wake_command") and event.is_at_or_wake_command:
-            is_at_bot = True
-        # 检查消息链中的At组件
-        elif hasattr(event, "message_obj") and hasattr(event.message_obj, "message"):
-            from astrbot.core.message.components import At
-
-            for component in event.message_obj.message:
-                if isinstance(component, At):
-                    # 检查At的是否是机器人自身
-                    if hasattr(event, "message_obj") and hasattr(
-                        event.message_obj, "self_id"
-                    ):
-                        if str(component.qq) == str(event.message_obj.self_id):
-                            is_at_bot = True
-                            break
-
-        # 收集用户消息历史
-        if user_key not in self.user_messages:
-            self.user_messages[user_key] = []
-
-        # 清理时间窗口外的消息
-        self.user_messages[user_key] = [
-            (t, m)
-            for t, m in self.user_messages[user_key]
-            if (now - t).total_seconds() <= self.spam_detection_time_window
-        ]
-
-        # 只添加@机器人的消息到历史记录
-        if is_at_bot:
-            self.user_messages[user_key].append((now, message))
-
-        # 使用LLM进行判断
-        if self.use_llm_for_spam_detection:
-            try:
-                # 使用默认的LLM提供商（主模型）
-                provider = self.context.get_using_provider()
-                if provider:
-                    # 构建上下文信息
-                    recent_messages = [m for t, m in self.user_messages[user_key]]
-
-                    # 构建提示词
-                    time_window_str = f"{self.spam_detection_time_window}秒"
-                    prompt = f"""请分析以下用户行为，判断是否存在刷好感度行为。
-
-用户最近{time_window_str}内的消息记录：
-{chr(10).join([f"- {m}" for m in recent_messages[-self.spam_detection_message_count :]])}
-
-请判断用户是否存在刷好感度行为？（是/否）
-
-请以JSON格式返回：
-{{"is_spam": true/false}}"""
-
-                    # 调用LLM
-                    contexts = [{"role": "user", "content": prompt}]
-                    response = await provider.text_chat(contexts=contexts)
-
-                    if response and response.completion_text:
-                        import json
-
-                        try:
-                            # 尝试解析JSON响应
-                            result_text = response.completion_text.strip()
-                            # 提取JSON部分
-                            if "```json" in result_text:
-                                result_text = (
-                                    result_text.split("```json")[1]
-                                    .split("```")[0]
-                                    .strip()
-                                )
-                            elif "```" in result_text:
-                                result_text = (
-                                    result_text.split("```")[1].split("```")[0].strip()
-                                )
-
-                            result = json.loads(result_text)
-
-                            if result.get("is_spam", False):
-                                return True, None
-                        except Exception as e:
-                            logger.warning(f"LLM刷分检测解析失败: {e}")
-            except Exception as e:
-                logger.warning(f"LLM刷分检测失败: {e}")
-
-        # 当LLM判断关闭或失败时，默认不惩罚
-        logger.info(f"用户 {user_id} 未检测到刷好感行为")
+        """已停用刷分检测机制"""
         return False, None
 
     async def _apply_penalty(self, user_id: str, session_id: str):
-        """应用惩罚"""
-        # 如果惩罚机制已禁用，直接返回
-        if not self.enable_penalty:
-            return
-
-        now = datetime.now()
-        user_key = user_id
-
-        # 统一惩罚处理：惩罚时间内好感度无法上涨
-        expires = now + timedelta(minutes=self.penalty_duration)
-
-        self.penalty_records[user_key] = {"expires": expires}
-
-        logger.warning(
-            f"用户 {user_id} 触发刷分检测，{self.penalty_duration}分钟内好感度无法上涨"
-        )
+        """已停用惩罚机制"""
+        return
 
     def _get_daily_favour_change(self, user_id: str) -> int:
         """获取用户今日好感度变化"""
@@ -1480,18 +1350,8 @@ class FavourManagerTool(Star):
             if not self._is_favour_session_enabled(session_id):
                 return
 
-            message = event.message_str or ""
-            is_spam, _ = await self._is_spam_behavior(user_id, message, event)
-            detected_spam = is_spam
-            if is_spam:
-                await self._apply_penalty(user_id, session_id)
-
             daily_change = self._get_daily_favour_change(user_id)
             daily_remaining_increase = max(0, self.max_daily_increase - daily_change)
-            penalty_active = (
-                user_id in self.penalty_records
-                and datetime.now() < self.penalty_records[user_id]["expires"]
-            )
 
             record = await self.db_manager.get_favour(user_id, session_id)
             if record:
@@ -1504,8 +1364,6 @@ class FavourManagerTool(Star):
             increase_block_reasons = []
             if current_favour >= self.max_favour_value:
                 increase_block_reasons.append("current favour already reached max")
-            if penalty_active:
-                increase_block_reasons.append("penalty is active")
             if daily_remaining_increase <= 0:
                 increase_block_reasons.append(
                     "daily favour increase quota is exhausted"
@@ -1589,35 +1447,20 @@ class FavourManagerTool(Star):
                     "不能因为一次普通示好就大幅上涨。\n"
                 )
 
-            recent_messages = []
-            if user_id in self.user_messages:
-                recent_messages = [
-                    m
-                    for _, m in self.user_messages[user_id][
-                        -self.spam_detection_message_count :
-                    ]
-                ]
-
-            recent_messages_text = (
-                "\n".join(f"- {m}" for m in recent_messages)
-                if recent_messages
-                else "- 无"
-            )
             increase_block_reason_text = (
                 "; ".join(increase_block_reasons) if increase_block_reasons else "无"
             )
 
             prompt_final = f"""# 好感度主链路
 
-你在这次回复中只负责三件事：
+你在这次回复中只负责两件事：
 1. 自然回复用户最新消息
 2. 判断好感度变化
-3. 判断这次互动是否属于刷分
 
 禁止事项：
 - 不要生成任何印象、画像、总结
 - 不要输出 `[印象：...]`
-- 不要输出除好感度标签和刷分标签以外的额外标签
+- 不要输出除好感度标签以外的额外系统标签
 - 不要暴露你的推理过程
 - 如果当前不允许好感度上升，则绝对不能输出好感度上升
 
@@ -1648,15 +1491,10 @@ class FavourManagerTool(Star):
 限制条件：
 - 好感度上升范围：{self.favour_increase_min}-{self.favour_increase_max}
 - 好感度下降范围：{self.favour_decrease_min}-{self.favour_decrease_max}
-- 当前是否检测到刷分：{"是" if detected_spam else "否"}
-- 当前是否处于惩罚期：{"是" if penalty_active else "否"}
 - 今日已增加好感度：{daily_change}
 - 今日剩余可增加好感度：{daily_remaining_increase}
 - 当前是否允许好感度上升：{"是" if can_increase_favour else "否"}
 - 禁止上升原因：{increase_block_reason_text}
-
-最近消息（{self.spam_detection_time_window} 秒内）：
-{recent_messages_text}
 
 【输出格式强制要求】：
 1. 先正常回复用户的最新消息（保持人设口吻）；
@@ -1664,10 +1502,7 @@ class FavourManagerTool(Star):
 [好感度上升：X]
 or [好感度降低：Y]
 or [好感度持平]
-3. 接着单独换一行输出刷分检测标签：
-[刷分检测：是]
-or [刷分检测：否]
-4. 严禁输出 `[印象：...]`，不要暴露任何推理说明，严格确保末尾标签完整。
+3. 严禁输出 `[印象：...]`，严禁输出任何刷分或额外系统标记，不要暴露任何推理说明，严格确保末尾标签完整。
 """
             existing_sp = (getattr(req, "system_prompt", None) or "").strip()
             if existing_sp:
@@ -1801,24 +1636,6 @@ or [刷分检测：否]
             llm_suggested_change = data["change"]
             adjusted_reason = ""
 
-            # 处理刷分检测结果
-            if data.get("is_spam", False):
-                # 应用惩罚
-                await self._apply_penalty(user_id, session_id)
-                logger.info(f"用户 {user_id} 被检测到刷分行为，已应用惩罚")
-
-            # 检查是否在惩罚期内
-            user_key = user_id
-            if user_key in self.penalty_records:
-                penalty = self.penalty_records[user_key]
-                now = datetime.now()
-                if now < penalty["expires"]:
-                    # 在惩罚期内，禁止好感度上涨
-                    if data["change"] > 0:
-                        data["change"] = 0
-                        adjusted_reason = "惩罚期阻止上涨"
-                        logger.info(f"用户 {user_id} 在惩罚期内，好感度上涨被阻止")
-
             record = await self.db_manager.get_favour(user_id, session_id)
             old_fav = record.favour if record else await self._get_initial_favour(event)
 
@@ -1883,8 +1700,6 @@ or [刷分检测：否]
             await self._update_daily_favour_change(user_id, data["change"])
 
             log_msg = f"用户 {user_id} (会话 {session_id}) 数据更新: 好感度 {old_fav}->{new_fav} (Δ{data['change']})"
-            if data.get("is_spam", False):
-                log_msg += ", 检测到刷分行为"
             if llm_suggested_change != data["change"]:
                 log_msg += (
                     f", LLM原始建议变化 {llm_suggested_change}"
@@ -2562,30 +2377,7 @@ or [刷分检测：否]
     @filter.command("查询惩罚列表")
     async def query_penalty_list(self, event: AstrMessageEvent):
         """查询当前在惩罚期的用户列表"""
-        # 所有人都可以使用
-
-        now = datetime.now()
-        penalty_list = []
-
-        # 检查惩罚记录
-        for user_id, penalty in self.penalty_records.items():
-            if now < penalty["expires"]:
-                remaining = (penalty["expires"] - now).total_seconds() / 60
-                # 获取用户显示名称
-                user_name = await self._get_user_display_name(event, user_id)
-                penalty_list.append(
-                    f"- {user_name} (ID: {user_id})：剩余 {remaining:.1f} 分钟"
-                )
-
-        if not penalty_list:
-            yield event.plain_result("当前没有用户在惩罚期。")
-            return
-
-        msg = ["🔨 惩罚列表 🔨"]
-        msg.append("⚠️  处于惩罚期间的用户，好感度将无法上升 ⚠️")
-        msg.append("")
-        msg.extend(penalty_list)
-        yield event.plain_result("\n".join(msg))
+        yield event.plain_result("刷分检测与惩罚机制已被移除。")
 
     @filter.command("好感度指令帮助")
     async def help_usage(self, event: AstrMessageEvent):
