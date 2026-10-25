@@ -208,6 +208,9 @@ class FavourManagerTool(Star):
                 logger.info("检测到旧版会话好感度文件，开始迁移...")
                 await self.db_manager.migrate_from_json(old_local, is_global=False)
 
+            if self.is_global_favour:
+                await self.db_manager.cleanup_orphan_group_records_in_global_mode()
+
             # 从数据库加载每日好感度变化数据
             await self._load_daily_favour_changes()
 

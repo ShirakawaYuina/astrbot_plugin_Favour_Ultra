@@ -346,7 +346,17 @@ class FavourDBManager:
                 FavourRecord.user_id == user_id, FavourRecord.session_id == sid
             )
             result = await session.execute(stmt)
-            return result.scalars().first()
+            record = result.scalars().first()
+            if not record and sid != "global":
+                raw_gid = sid.split(":")[-1] if ":" in sid else sid
+                stmt_fuzzy = select(FavourRecord).where(
+                    FavourRecord.user_id == user_id,
+                    (FavourRecord.session_id == raw_gid)
+                    | (FavourRecord.session_id.like(f"%{raw_gid}%")),
+                )
+                fuzzy_res = await session.execute(stmt_fuzzy)
+                record = fuzzy_res.scalars().first()
+            return record
 
     async def update_favour(
         self,
@@ -376,6 +386,16 @@ class FavourDBManager:
                 )
                 result = await session.execute(stmt)
                 record = result.scalars().first()
+
+                if not record and sid != "global":
+                    raw_gid = sid.split(":")[-1] if ":" in sid else sid
+                    stmt_fuzzy = select(FavourRecord).where(
+                        FavourRecord.user_id == user_id,
+                        (FavourRecord.session_id == raw_gid)
+                        | (FavourRecord.session_id.like(f"%{raw_gid}%")),
+                    )
+                    fuzzy_res = await session.execute(stmt_fuzzy)
+                    record = fuzzy_res.scalars().first()
 
                 if not record:
                     # 只有uid为1158662154的用户才会达到100好感度
@@ -506,6 +526,16 @@ class FavourDBManager:
                 )
                 result = await session.execute(stmt)
                 record = result.scalars().first()
+
+                if not record and sid != "global":
+                    raw_gid = sid.split(":")[-1] if ":" in sid else sid
+                    stmt_fuzzy = select(FavourRecord).where(
+                        FavourRecord.user_id == user_id,
+                        (FavourRecord.session_id == raw_gid)
+                        | (FavourRecord.session_id.like(f"%{raw_gid}%")),
+                    )
+                    fuzzy_res = await session.execute(stmt_fuzzy)
+                    record = fuzzy_res.scalars().first()
 
                 if not record:
                     return False, "未找到记录"
@@ -945,6 +975,41 @@ class FavourDBManager:
             await self.engine.dispose()
         except Exception as e:
             logger.error(f"关闭数据库引擎失败: {e}")
+
+    async def cleanup_orphan_group_records_in_global_mode(self):
+        """当全局好感度开启时，合并并清理因历史前端会话误传产生的纯数字群 ID 孤儿记录。"""
+        await self.init_db()
+        try:
+            async with self.async_session() as session:
+                stmt = select(FavourRecord).where(FavourRecord.session_id != "global")
+                records = (await session.execute(stmt)).scalars().all()
+                modified = False
+                for r in records:
+                    raw_sid = r.session_id.split(":")[-1] if ":" in r.session_id else r.session_id
+                    if raw_sid.isdigit() and r.session_id != "global":
+                        stmt_global = select(FavourRecord).where(
+                            FavourRecord.user_id == r.user_id,
+                            FavourRecord.session_id == "global",
+                        )
+                        global_rec = (await session.execute(stmt_global)).scalars().first()
+                        if global_rec:
+                            if r.aliases_locked and not global_rec.aliases_locked:
+                                global_rec.aliases_locked = True
+                                modified = True
+                            if (
+                                r.aliases
+                                and r.aliases != "[]"
+                                and (not global_rec.aliases or global_rec.aliases == "[]")
+                            ):
+                                global_rec.aliases = r.aliases
+                                modified = True
+                            await session.delete(r)
+                            modified = True
+                if modified:
+                    await session.commit()
+                    logger.info("已自动迁移并清理历史孤儿群好感度记录")
+        except Exception as e:
+            logger.debug(f"清理孤儿群记录提示: {e}")
 
     async def get_session_aliases_map(self, session_id: str) -> dict[str, dict]:
         """获取指定会话中拥有别名的用户映射 {user_id: {"user_name": str, "aliases": list[str], "locked": bool}}。"""

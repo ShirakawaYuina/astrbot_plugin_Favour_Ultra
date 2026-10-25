@@ -144,6 +144,7 @@ class FavourWebApi:
             rows.append(
                 {
                     "user_id": uid,
+                    "session_id": str(record.session_id or GLOBAL_SESSION_ID),
                     "nickname": str(nick or ""),
                     "favour": int(record.favour),
                     "relationship": str(record.relationship or ""),
@@ -439,17 +440,37 @@ class FavourWebApi:
         ):
             return error_response("没有需要修改的字段", status_code=400)
 
-        if scope == "all":
-            # 全局模式只支持好感度，关系和印象按会话独立维护。
+        # 确定目标写入的 session_id（全局好感模式下所有记录归敛于 global）
+        if self.plugin.is_global_favour:
+            target_session_id = GLOBAL_SESSION_ID
+        else:
+            target_session_id = session_id
+
+        if scope == "all" and not self.plugin.is_global_favour:
+            # 分群模式下的跨会话同步：好感度同步至全部会话
             if favour is None:
                 return error_response("跨会话修改目前仅支持好感度字段", status_code=400)
             affected = await self.plugin.db_manager.update_user_all_records(
                 user_id, favour=favour
             )
+            if (
+                relationship is not None
+                or impression is not None
+                or aliases is not None
+                or aliases_locked is not None
+            ):
+                await self.plugin.db_manager.update_favour(
+                    user_id,
+                    target_session_id,
+                    relationship=relationship,
+                    impression=impression,
+                    aliases=aliases,
+                    aliases_locked=aliases_locked,
+                )
         else:
             updated = await self.plugin.db_manager.update_favour(
                 user_id,
-                session_id,
+                target_session_id,
                 favour=favour,
                 relationship=relationship,
                 impression=impression,
@@ -483,8 +504,11 @@ class FavourWebApi:
         session_id = str(
             payload.get("session_id", GLOBAL_SESSION_ID) or GLOBAL_SESSION_ID
         ).strip()
+        target_session_id = (
+            GLOBAL_SESSION_ID if self.plugin.is_global_favour else session_id
+        )
         deleted, message = await self.plugin.db_manager.delete_favour(
-            user_id, session_id
+            user_id, target_session_id
         )
         if not deleted:
             return error_response(message, status_code=400)

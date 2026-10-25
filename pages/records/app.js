@@ -94,7 +94,7 @@ async function toggleAliasLock(row) {
     setStatus(t("saving", "保存中…"));
     await bridge.apiPost("records/update", {
       user_id: row.user_id,
-      session_id: state.sessionId,
+      session_id: row.session_id || state.sessionId,
       aliases_locked: newLock,
     });
     row.aliases_locked = newLock;
@@ -319,7 +319,7 @@ async function submitEditor(event) {
   try {
     await bridge.apiPost("records/update", {
       user_id: row.user_id,
-      session_id: state.sessionId,
+      session_id: row.session_id || state.sessionId,
       scope,
       favour,
       relationship: dom.editorRelationship.value.trim(),
@@ -342,7 +342,7 @@ async function deleteRow(row) {
   try {
     await bridge.apiPost("records/delete", {
       user_id: row.user_id,
-      session_id: state.sessionId,
+      session_id: row.session_id || state.sessionId,
     });
     await load();
     setStatus(t("deleted", "已删除"));
