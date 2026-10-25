@@ -21,6 +21,8 @@ const dom = {
   editorFavour: document.getElementById("editor-favour"),
   editorRelationship: document.getElementById("editor-relationship"),
   editorImpression: document.getElementById("editor-impression"),
+  editorAliases: document.getElementById("editor-aliases"),
+  editorAliasesLocked: document.getElementById("editor-aliases-locked"),
   editorAllSessions: document.getElementById("editor-all-sessions"),
   editorError: document.getElementById("editor-error"),
   editorCancel: document.getElementById("editor-cancel"),
@@ -86,6 +88,23 @@ function renderOverview(overview) {
   );
 }
 
+async function toggleAliasLock(row) {
+  const newLock = !row.aliases_locked;
+  try {
+    setStatus(t("saving", "保存中…"));
+    await bridge.apiPost("records/update", {
+      user_id: row.user_id,
+      session_id: state.sessionId,
+      aliases_locked: newLock,
+    });
+    row.aliases_locked = newLock;
+    setStatus(newLock ? t("lockedSuccess", "已锁定外号") : t("unlockedSuccess", "已解锁外号"));
+    await load();
+  } catch (err) {
+    setStatus(err.message || t("lockFailed", "切换锁定状态失败"), true);
+  }
+}
+
 function renderRows(rows) {
   dom.body.replaceChildren(
     ...rows.map((row) => {
@@ -142,6 +161,38 @@ function renderRows(rows) {
         impressionCell.textContent = t("none", "无");
       }
 
+      // 称呼/外号单元格
+      const aliasesCell = document.createElement("td");
+      const aliasWrap = document.createElement("div");
+      aliasWrap.className = "alias-wrap";
+
+      const aliases = Array.isArray(row.aliases) ? row.aliases : [];
+      if (aliases.length > 0) {
+        aliases.forEach((alias) => {
+          const aChip = document.createElement("span");
+          aChip.className = "alias-chip";
+          aChip.textContent = alias;
+          aliasWrap.append(aChip);
+        });
+      } else {
+        const emptySpan = document.createElement("span");
+        emptySpan.className = "muted";
+        emptySpan.textContent = t("none", "无");
+        aliasWrap.append(emptySpan);
+      }
+
+      const lockBtn = document.createElement("button");
+      lockBtn.type = "button";
+      lockBtn.className = `lock-btn ${row.aliases_locked ? "locked" : ""}`.trim();
+      lockBtn.title = row.aliases_locked ? t("lockedHint", "已锁定，点击解锁") : t("unlockedHint", "未锁定，点击锁定");
+      lockBtn.textContent = row.aliases_locked ? "🔒" : "🔓";
+      lockBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        await toggleAliasLock(row);
+      });
+      aliasWrap.append(lockBtn);
+      aliasesCell.append(aliasWrap);
+
       const updatedCell = document.createElement("td");
       updatedCell.textContent = row.updated_at || "-";
 
@@ -165,6 +216,7 @@ function renderRows(rows) {
         relationshipCell,
         todayCell,
         impressionCell,
+        aliasesCell,
         updatedCell,
         actionsCell,
       );
@@ -237,6 +289,8 @@ function openEditor(row) {
   dom.editorFavour.value = row.favour;
   dom.editorRelationship.value = row.relationship || "";
   dom.editorImpression.value = row.impression || "";
+  dom.editorAliases.value = (row.aliases || []).join(", ");
+  dom.editorAliasesLocked.checked = !!row.aliases_locked;
   dom.editorAllSessions.checked = false;
   dom.editorError.textContent = "";
   dom.editor.showModal();
@@ -256,10 +310,11 @@ async function submitEditor(event) {
   }
 
   const scope = dom.editorAllSessions.checked ? "all" : "session";
-  if (scope === "all" && favour === row.favour) {
-    dom.editorError.textContent = t("noChange", "没有任何改动");
-    return;
-  }
+  const aliasesStr = dom.editorAliases.value || "";
+  const rawAliases = aliasesStr
+    .split(/[,，]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   try {
     await bridge.apiPost("records/update", {
@@ -269,6 +324,8 @@ async function submitEditor(event) {
       favour,
       relationship: dom.editorRelationship.value.trim(),
       impression: dom.editorImpression.value.trim(),
+      aliases: rawAliases,
+      aliases_locked: dom.editorAliasesLocked.checked,
     });
     dom.editor.close();
     await load();

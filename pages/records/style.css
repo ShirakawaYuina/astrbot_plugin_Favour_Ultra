@@ -372,3 +372,43 @@ table.records {
   justify-content: flex-end;
   gap: 10px;
 }
+
+
+.alias-wrap {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  max-width: 240px;
+}
+
+.alias-chip {
+  display: inline-block;
+  padding: 1px 7px;
+  font-size: 11px;
+  border-radius: 999px;
+  color: var(--text);
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
+}
+
+.lock-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 13px;
+  opacity: 0.6;
+  border-radius: 4px;
+  transition: opacity 0.2s, transform 0.1s;
+}
+
+.lock-btn:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.lock-btn.locked {
+  opacity: 1;
+  color: #e6a23c;
+}

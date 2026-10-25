@@ -148,6 +148,8 @@ class FavourWebApi:
                     "favour": int(record.favour),
                     "relationship": str(record.relationship or ""),
                     "impression": str(record.impression or ""),
+                    "aliases": record.get_aliases() if hasattr(record, "get_aliases") else [],
+                    "aliases_locked": bool(getattr(record, "aliases_locked", False)),
                     "interact_count": int(record.interact_count or 0),
                     "dialogue_round_count": int(record.dialogue_round_count or 0),
                     "today_change": self.plugin._get_daily_favour_change(uid),
@@ -189,6 +191,7 @@ class FavourWebApi:
                 if keyword in row["user_id"].lower()
                 or keyword in row.get("nickname", "").lower()
                 or keyword in row["impression"].lower()
+                or any(keyword in a.lower() for a in row.get("aliases", []))
             ]
 
         # 排序
@@ -412,7 +415,28 @@ class FavourWebApi:
         if impression is not None and not isinstance(impression, str):
             return error_response("impression 必须是字符串", status_code=400)
 
-        if favour is None and relationship is None and impression is None:
+        aliases = payload.get("aliases")
+        if aliases is not None:
+            if not isinstance(aliases, list):
+                return error_response("aliases 必须是列表", status_code=400)
+            cleaned_aliases = []
+            for a in aliases:
+                s = str(a).strip()
+                if s and len(s) <= 10 and s not in cleaned_aliases:
+                    cleaned_aliases.append(s)
+            aliases = cleaned_aliases[:5]
+
+        aliases_locked = payload.get("aliases_locked")
+        if aliases_locked is not None:
+            aliases_locked = bool(aliases_locked)
+
+        if (
+            favour is None
+            and relationship is None
+            and impression is None
+            and aliases is None
+            and aliases_locked is None
+        ):
             return error_response("没有需要修改的字段", status_code=400)
 
         if scope == "all":
@@ -429,6 +453,8 @@ class FavourWebApi:
                 favour=favour,
                 relationship=relationship,
                 impression=impression,
+                aliases=aliases,
+                aliases_locked=aliases_locked,
             )
             affected = 1 if updated else 0
 

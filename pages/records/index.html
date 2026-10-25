@@ -26,7 +26,7 @@
           id="keyword"
           type="search"
           autocomplete="off"
-          placeholder="用户 ID、昵称或印象"
+          placeholder="用户 ID、昵称、外号或印象"
           data-i18n-placeholder="searchHint"
         />
       </label>
@@ -60,6 +60,7 @@
             <th data-i18n="colRelationship">关系</th>
             <th class="num" data-i18n="colToday">今日变化</th>
             <th data-i18n="colImpression">印象</th>
+            <th data-i18n="colAliases">常用外号/称呼</th>
             <th data-i18n="colUpdatedAt">更新时间</th>
             <th class="actions" data-i18n="colActions">操作</th>
           </tr>
@@ -77,7 +78,7 @@
 
     <dialog id="editor" class="editor">
       <form id="editor-form" method="dialog">
-        <h2 class="editor-title" data-i18n="editTitle">编辑记录</h2>
+        <h2 class="editor-title text-h3 pa-4 pb-0 pl-6" data-i18n="editTitle">编辑记录</h2>
         <p class="editor-subject" id="editor-subject"></p>
         <label class="editor-field">
           <span data-i18n="favour">好感度</span>
@@ -91,14 +92,22 @@
           <span data-i18n="impression">印象</span>
           <input id="editor-impression" type="text" maxlength="64" />
         </label>
+        <label class="editor-field">
+          <span data-i18n="aliases">常用外号/称呼 (以逗号分隔)</span>
+          <input id="editor-aliases" type="text" maxlength="80" placeholder="例如: 牢尤, 猫猫" />
+        </label>
+        <label class="editor-checkbox">
+          <input id="editor-aliases-locked" type="checkbox" />
+          <span data-i18n="lockAliases">锁定外号（每日分析将不再自动覆盖或追加）</span>
+        </label>
         <label class="editor-checkbox">
           <input id="editor-all-sessions" type="checkbox" />
           <span data-i18n="applyAllSessions">应用到所有会话（仅好感度）</span>
         </label>
         <p id="editor-error" class="editor-error" role="alert"></p>
         <div class="editor-actions">
-          <button id="editor-cancel" class="btn" type="button" data-i18n="cancel">取消</button>
-          <button class="btn primary" type="submit" data-i18n="save">保存</button>
+          <button id="editor-cancel" class="btn" variant="text" type="button" data-i18n="cancel">取消</button>
+          <button class="btn primary" variant="tonal" type="submit" data-i18n="save">保存</button>
         </div>
       </form>
     </dialog>

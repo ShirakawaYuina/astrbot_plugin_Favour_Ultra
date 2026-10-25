@@ -27,6 +27,29 @@ from .utils import is_valid_userid
 from .web_api import FavourWebApi
 
 
+class ImpressionResult(str):
+    """印象分析结果封装，兼容直接作为纯文本印象使用以及获取别名列表。"""
+
+    def __new__(cls, impression: str = "", aliases: list[str] | None = None):
+        instance = super().__new__(cls, impression)
+        instance.impression = impression
+        instance.aliases = aliases or []
+        return instance
+
+    def get(self, key, default=None):
+        if key == "impression":
+            return self.impression
+        if key == "aliases":
+            return self.aliases
+        return default
+
+    def __getitem__(self, key):
+        if key == "impression":
+            return self.impression
+        if key == "aliases":
+            return self.aliases
+        return super().__getitem__(key)
+
 class FavourManagerTool(Star):
     enable_daily_impression: bool = False
     daily_impression_time: str = "03:30"
@@ -542,6 +565,7 @@ class FavourManagerTool(Star):
         group_id: str,
         active_users: dict[str, dict],
         user_existing_impressions: dict[str, str] | None = None,
+        user_existing_aliases: dict[str, list[str]] | None = None,
     ) -> str:
         """构建针对群聊所有活跃成员的单次印象分析提示词。
 
@@ -554,44 +578,50 @@ class FavourManagerTool(Star):
             发送给大模型的完整提示词文本。
         """
         existing_map = user_existing_impressions or {}
+        existing_aliases_map = user_existing_aliases or {}
         user_sections = []
         for idx, (uid, data) in enumerate(active_users.items(), start=1):
             name = data.get("user_name", uid)
             msgs = data.get("messages", [])
             old_imp = existing_map.get(uid, "").strip()
             old_tag = f" (既有印象: {old_imp})" if old_imp else ""
+            old_aliases = existing_aliases_map.get(uid, [])
+            alias_tag = f" (已知称呼: {', '.join(old_aliases)})" if old_aliases else ""
             msg_list = "\n".join(f"- {m}" for m in msgs)
             user_sections.append(
-                f"【成员 {idx}】UID: {uid}, 昵称: {name}{old_tag}\n发言列表:\n{msg_list}"
+                f"【成员 {idx}】UID: {uid}, 昵称: {name}{old_tag}{alias_tag}\n发言列表:\n{msg_list}"
             )
 
         users_text = "\n\n".join(user_sections)
         prompt = (
             f"你是一个敏锐细腻的群聊人设观察员。\n"
             f"以下是群聊【{group_id}】在过去一天中各活跃成员的真实发言记录。\n"
-            f"请阅读各成员的言行与互动氛围，为每一位活跃成员提炼一句生动的“今日人设印象”。\n\n"
+            f"请阅读各成员的言行与互动氛围，为每一位活跃成员提炼一句生动的“今日人设印象”，并识别群友在聊天中对该成员的“常用外号/称呼”。\n\n"
             f"【群成员发言记录】\n"
             f"{users_text}\n\n"
             f"【生成要求】\n"
             f"1. 观察每位成员的发言风格、情绪倾向和常聊话题（例如：热心技术宅、造梗气氛组、吐槽狂人、佛系摸鱼人等）；\n"
-            f"2. 为每位成员生成一句不超过 10 个汉字的印象；\n"
-            f"3. 若成员存在既有印象，请在原有基调上平滑微调或深化，避免仅因一两句话剧烈颠覆；\n"
-            f"4. 必须以严格的标准 JSON 键值对格式输出，键为成员的 UID 字符串，值为不超过 10 个汉字的印象字符串；\n"
-            f"5. 严禁输出 Markdown 代码块标记（如 ```json ），严禁附带解释或多余字符，直接输出标准 JSON 对象。\n\n"
+            f"2. 为每位成员生成一句不超过 10 个汉字的“今日人设印象”；\n"
+            f"3. 观察群友在聊天中如何呼叫或指代该成员（提取专属称呼、简称、外号或梗名，例如“牢尤”、“猫猫”、“阿强”）；\n"
+            f"   - 严格排除无针对性的通用社交代词（如：哥们、大哥、兄弟、老板、佬、群主、管理、机器人、大家、群友等）；\n"
+            f"   - 若当天没有出现特定指代外号，aliases 必须为空列表 []；\n"
+            f"4. 若成员存在既有印象或已知称呼，请在原有基调上平滑微调或保留，避免剧烈颠覆；\n"
+            f"5. 必须以严格的标准 JSON 键值对格式输出，键为成员的 UID 字符串，值为包含 impression（不超过10字印象字符串）和 aliases（外号字符串列表）的对象；\n"
+            f"6. 严禁输出 Markdown 代码块标记（如 ```json ），严禁附带解释或多余字符，直接输出标准 JSON 对象。\n\n"
             f"【输出示例】\n"
-            f'{{"10001": "爱吐槽的加班打工人", "10002": "高频造梗气氛组"}}'
+            f'{{"10001": {{"impression": "爱吐槽的加班打工人", "aliases": ["牢尤", "猫猫"]}}, "10002": {{"impression": "高频造梗气氛组", "aliases": ["咕师傅"]}}}}'
         )
         return prompt
 
     @staticmethod
-    def _parse_group_impression_json(response_text: str) -> dict[str, str]:
-        """解析并清洗大模型返回的群印象 JSON 结果。
+    def _parse_group_impression_json(response_text: str) -> dict[str, dict]:
+        """解析并清洗大模型返回的群印象与外号 JSON 结果。
 
         Args:
             response_text: 大模型返回的原始回复文本。
 
         Returns:
-            {user_id: cleaned_impression} 字典。
+            {user_id: {"impression": str, "aliases": list[str]}} 字典。
         """
         if not response_text:
             return {}
@@ -615,18 +645,48 @@ class FavourManagerTool(Star):
             return {}
 
         result = {}
-        for uid, raw_imp in data.items():
-            if not isinstance(raw_imp, str):
+        blacklist = {
+            "哥们", "大哥", "兄弟", "老板", "佬", "群主", "管理", "管理员",
+            "机器人", "大家", "群友", "有人", "楼主", "群友们", "某人", "本人", "自己",
+            "self", "me", "admin", "bot",
+        }
+        for uid, raw_val in data.items():
+            uid_str = str(uid).strip()
+            if not uid_str:
                 continue
-            cleaned = str(raw_imp).strip()
-            cleaned = re.sub(
+
+            raw_imp = ""
+            raw_aliases = []
+            if isinstance(raw_val, dict):
+                raw_imp = str(raw_val.get("impression") or "")
+                raw_aliases = raw_val.get("aliases") or []
+            elif isinstance(raw_val, str):
+                raw_imp = str(raw_val)
+
+            cleaned_imp = re.sub(
                 r"^(?:目标用户的?|该用户的?|用户)?(?:印象(?:是)?|特质|评价|画像)[:：\s]*",
                 "",
-                cleaned,
+                raw_imp.strip(),
             )
-            cleaned = cleaned.strip("“”\"'‘’。，！! ")
-            if cleaned:
-                result[str(uid)] = cleaned[:10] if len(cleaned) > 10 else cleaned
+            cleaned_imp = cleaned_imp.strip("“”\"'‘’。，！! ")
+            if len(cleaned_imp) > 10:
+                cleaned_imp = cleaned_imp[:10]
+
+            cleaned_aliases = []
+            if isinstance(raw_aliases, list):
+                for a in raw_aliases:
+                    if not isinstance(a, str):
+                        continue
+                    clean_a = re.sub(r"[\[\]［］()（）\"'“”‘’\s]", "", a).strip()
+                    if not clean_a or len(clean_a) > 10 or clean_a.isdigit():
+                        continue
+                    if clean_a.lower() in blacklist:
+                        continue
+                    if clean_a.lower() not in [x.lower() for x in cleaned_aliases]:
+                        cleaned_aliases.append(clean_a)
+
+            if cleaned_imp or cleaned_aliases:
+                result[uid_str] = ImpressionResult(cleaned_imp, cleaned_aliases[:5])
         return result
 
     async def _run_daily_group_impression_batch(
@@ -696,10 +756,18 @@ class FavourManagerTool(Star):
                 if record and record.impression:
                     existing_impressions[uid] = record.impression
 
+            existing_aliases = {}
+            for uid in active_users:
+                session_key = "global" if self.is_global_favour else group_id
+                rec = await self.db_manager.get_favour(uid, session_key)
+                if rec and rec.get_aliases():
+                    existing_aliases[uid] = rec.get_aliases()
+
             prompt = self._build_group_impression_prompt(
                 group_id=group_id,
                 active_users=active_users,
                 user_existing_impressions=existing_impressions,
+                user_existing_aliases=existing_aliases,
             )
 
             timeout_seconds = float(
@@ -717,16 +785,33 @@ class FavourManagerTool(Star):
                 )
 
                 group_res = {}
-                for uid, impression in parsed_impressions.items():
-                    if uid in active_users and impression:
+                for uid, item in parsed_impressions.items():
+                    if uid in active_users:
+                        impression = item.get("impression", "") if hasattr(item, "get") else str(item)
+                        new_aliases = item.get("aliases", []) if hasattr(item, "get") else []
                         session_key = "global" if self.is_global_favour else group_id
+                        record = await self.db_manager.get_favour(uid, session_key)
+
+                        # 处理别名合并与锁定
+                        merged_aliases = None
+                        if record and record.aliases_locked:
+                            merged_aliases = None
+                        elif new_aliases:
+                            old_aliases = record.get_aliases() if record else []
+                            merged = list(old_aliases)
+                            for a in new_aliases:
+                                if a.lower() not in [x.lower() for x in merged]:
+                                    merged.append(a)
+                            merged_aliases = merged[-5:]
+
                         await self.db_manager.update_favour(
                             user_id=uid,
                             session_id=session_key,
-                            impression=impression,
+                            impression=impression if impression else None,
+                            aliases=merged_aliases,
                         )
-                        group_res[uid] = impression
-
+                        if impression:
+                            group_res[uid] = impression
                 if group_res:
                     total_results[group_id] = group_res
                     logger.info(
@@ -1446,6 +1531,22 @@ class FavourManagerTool(Star):
                 if rel_rows:
                     relationship_table_str = "\n".join(rel_rows)
 
+
+            # 获取用户别名信息与当前会话群成员常用称呼映射
+            user_aliases = record.get_aliases() if record else []
+            user_aliases_str = ", ".join(user_aliases) if user_aliases else "暂无特定外号"
+
+            alias_session_key = "global" if self.is_global_favour else session_id
+            session_aliases_map = await self.db_manager.get_session_aliases_map(alias_session_key)
+            if session_aliases_map:
+                alias_rows = []
+                for m_uid, m_data in list(session_aliases_map.items())[:15]:
+                    m_name = m_data.get("user_name") or m_uid
+                    m_aliases = ", ".join(m_data.get("aliases") or [])
+                    alias_rows.append(f"- {m_name} (UID: {m_uid}): 常用称呼: [{m_aliases}]")
+                session_aliases_table_str = "\n".join(alias_rows)
+            else:
+                session_aliases_table_str = "无"
             if self.favour_mode == "galgame":
                 mode_instruction = (
                     "模式：Galgame。\n"
@@ -1524,9 +1625,17 @@ class FavourManagerTool(Star):
 - 当前好感度：{current_favour}
 - 好感度上限：{self.max_favour_value}
 - 当前关系：{current_relationship}
+- 用户的常用外号/称呼：{user_aliases_str}
 
 当前会话关系表：
 {relationship_table_str}
+
+当前会话成员常用称呼/外号表：
+{session_aliases_table_str}
+
+称呼与指代指引：
+1. 当其他成员在聊天中提及上述外号或称呼时，理解其指代对应 UID 成员及其好感背景；
+2. 你在回复中若提及这些成员，可自然、亲切地选用这些常用称呼指代他们。
 
 互动模式说明：
 {mode_instruction}
@@ -1778,6 +1887,100 @@ or [刷分检测：否]
 
         except Exception as e:
             logger.error(f"更新好感度数据失败: {str(e)}\n{traceback.format_exc()}")
+
+    # ================= 0. LLM 实时称呼工具 =================
+
+    @filter.llm_tool(name="record_member_nickname")
+    async def record_member_nickname(
+        self,
+        event: AstrMessageEvent,
+        nickname: str,
+        target_user: str = "self",
+        user_id: str = "",
+    ) -> str:
+        """当用户在对话中明确告知机器人某位用户的称呼、外号、昵称（例如：'以后叫我阿强'、'尤约拉猫叫猫猫'、'他叫老李'）时调用此工具，将其记录至数据库。
+
+        Args:
+            nickname(string): 要记录的称呼/外号/昵称（如：'阿强'、'猫猫'、'老李'）。
+            target_user(string): 目标用户的名称或代指。若用户指代自己（如'叫我xx'），传'self'；若指代他人，传对方的群名片/昵称或描述。
+            user_id(string, optional): 若消息中能明确推断出目标用户的数字UID，则传入；否则留空由系统自动解析。
+        """
+        try:
+            clean_nick = re.sub(r"[\[\]［］()（）\"'“”‘’\s]", "", str(nickname or "")).strip()
+            if not clean_nick or len(clean_nick) > 10:
+                return "称呼长度需在1到10个字符之间"
+            if clean_nick.isdigit():
+                return "称呼不能全为纯数字"
+            if clean_nick.lower() in {
+                "哥们", "大哥", "兄弟", "老板", "佬", "群主", "管理", "管理员",
+                "机器人", "大家", "群友", "有人", "楼主", "群友们", "某人", "本人", "自己",
+                "self", "me", "admin", "bot",
+            }:
+                return f"'{clean_nick}' 属于通用社交代词，不能作为特定用户的专属外号"
+
+            target_uid = ""
+            target_name = ""
+
+            target_desc = str(target_user or "").strip().lower()
+            sender_id = str(event.get_sender_id() or "")
+            sender_name = event.get_sender_name() if hasattr(event, "get_sender_name") else sender_id
+
+            if target_desc in ("self", "me", "我", "自己", "本人") or (not target_desc and not user_id):
+                target_uid = sender_id
+                target_name = sender_name or target_uid
+            else:
+                # 1. 检查消息链中是否有 At 组件
+                if hasattr(event, "message_obj") and hasattr(event.message_obj, "message"):
+                    for comp in event.message_obj.message:
+                        if isinstance(comp, At) and getattr(comp, "qq", None):
+                            at_uid = str(comp.qq)
+                            if at_uid != str(getattr(event.message_obj, "self_id", "")):
+                                target_uid = at_uid
+                                break
+
+                # 2. 检查是否传入显式 user_id
+                if not target_uid and user_id and str(user_id).strip().isdigit():
+                    target_uid = str(user_id).strip()
+
+                # 3. 在当前会话记录中模糊匹配名称
+                session_id = self._get_session_id(event)
+                if not target_uid and target_user:
+                    records = await self.db_manager.get_all_in_session(session_id)
+                    for r in records:
+                        if r.nickname and (target_user in r.nickname or r.nickname in target_user):
+                            target_uid = str(r.user_id)
+                            target_name = r.nickname
+                            break
+
+                if not target_uid:
+                    return f"未能定位目标用户 '{target_user}'，请@对方或提供对方的群名片/UID"
+
+            if not target_name:
+                target_name = await self._get_user_display_name(event, target_uid)
+
+            # 确定持久化会话键（遵循全局模式设定）
+            session_key = "global" if self.is_global_favour else self._get_session_id(event)
+            record = await self.db_manager.get_favour(target_uid, session_key)
+
+            if record and record.aliases_locked:
+                return f"用户 {target_name} ({target_uid}) 的称呼已被管理员锁定，无法通过聊天修改，请在管理面板中调整。"
+
+            existing_aliases = record.get_aliases() if record else []
+            merged = [a for a in existing_aliases if a.lower() != clean_nick.lower()]
+            merged.append(clean_nick)
+            merged = merged[-5:]
+
+            await self.db_manager.update_favour(
+                user_id=target_uid,
+                session_id=session_key,
+                nickname=target_name,
+                aliases=merged,
+            )
+            return f"成功为用户 {target_name} ({target_uid}) 记录称呼: {clean_nick}，当前全部称呼: [{', '.join(merged)}]"
+        except Exception as e:
+            logger.error(f"LLM工具 record_member_nickname 执行失败: {e}\n{traceback.format_exc()}")
+            return f"记录称呼失败: {e}"
+
 
     # ================= 1. 查询类型 =================
 

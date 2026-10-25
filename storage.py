@@ -33,6 +33,20 @@ class FavourRecord(SQLModel, table=True):
     dialogue_round_count: int = Field(default=0)
     impression: str = Field(default="")
     is_unique: bool = Field(default=False)
+    aliases: str = Field(default="[]")
+    aliases_locked: bool = Field(default=False)
+
+    def get_aliases(self) -> list[str]:
+        """获取结构化别名列表。"""
+        if not self.aliases:
+            return []
+        try:
+            val = json.loads(self.aliases)
+            if isinstance(val, list):
+                return [str(x).strip() for x in val if str(x).strip()]
+            return []
+        except Exception:
+            return []
     created_at: datetime = Field(default_factory=datetime.now, sa_type=DateTime)
     updated_at: datetime = Field(default_factory=datetime.now, sa_type=DateTime)
 
@@ -209,6 +223,18 @@ class FavourDBManager:
                             text("ALTER TABLE favour_records ADD COLUMN nickname TEXT DEFAULT ''")
                         )
                         logger.info("favour_records 已添加 nickname 列")
+                    if fav_cols and "aliases" not in fav_cols:
+                        logger.info("favour_records 缺少 aliases 列，执行自动迁移添加...")
+                        await conn.execute(
+                            text("ALTER TABLE favour_records ADD COLUMN aliases TEXT DEFAULT '[]'")
+                        )
+                        logger.info("favour_records 已添加 aliases 列")
+                    if fav_cols and "aliases_locked" not in fav_cols:
+                        logger.info("favour_records 缺少 aliases_locked 列，执行自动迁移添加...")
+                        await conn.execute(
+                            text("ALTER TABLE favour_records ADD COLUMN aliases_locked BOOLEAN DEFAULT 0")
+                        )
+                        logger.info("favour_records 已添加 aliases_locked 列")
 
                 self._initialized = True
                 logger.info(f"好感度数据库已初始化: {self.db_path}")
@@ -333,6 +359,8 @@ class FavourDBManager:
         dialogue_round_count: int | None = None,
         impression: str | None = None,
         nickname: str | None = None,
+        aliases: list[str] | str | None = None,
+        aliases_locked: bool | None = None,
     ) -> bool:
         """更新好感度记录"""
         await self.init_db()
@@ -372,6 +400,12 @@ class FavourDBManager:
                         else 0,
                         impression=impression if impression is not None else "",
                         is_unique=is_unique if is_unique is not None else False,
+                        aliases=(
+                            json.dumps(aliases, ensure_ascii=False)
+                            if isinstance(aliases, list)
+                            else (aliases or "[]")
+                        ),
+                        aliases_locked=bool(aliases_locked) if aliases_locked is not None else False,
                     )
                     session.add(record)
                 else:
@@ -393,6 +427,13 @@ class FavourDBManager:
                         record.impression = impression
                     if nickname is not None and nickname:
                         record.nickname = nickname
+                    if aliases is not None:
+                        if isinstance(aliases, list):
+                            record.aliases = json.dumps(aliases, ensure_ascii=False)
+                        elif isinstance(aliases, str):
+                            record.aliases = aliases
+                    if aliases_locked is not None:
+                        record.aliases_locked = bool(aliases_locked)
                     record.updated_at = datetime.now()
                     session.add(record)
 
@@ -904,3 +945,41 @@ class FavourDBManager:
             await self.engine.dispose()
         except Exception as e:
             logger.error(f"关闭数据库引擎失败: {e}")
+
+    async def get_session_aliases_map(self, session_id: str) -> dict[str, dict]:
+        """获取指定会话中拥有别名的用户映射 {user_id: {"user_name": str, "aliases": list[str], "locked": bool}}。"""
+        await self.init_db()
+        sid = session_id if session_id else "global"
+        try:
+            async with self.async_session() as session:
+                stmt = select(FavourRecord).where(FavourRecord.session_id == sid)
+                result = await session.execute(stmt)
+                records = result.scalars().all()
+                res = {}
+                for r in records:
+                    aliases = r.get_aliases()
+                    if aliases:
+                        res[str(r.user_id)] = {
+                            "user_name": r.nickname or str(r.user_id),
+                            "aliases": aliases,
+                            "locked": bool(r.aliases_locked),
+                        }
+                return res
+        except Exception as e:
+            logger.error(f"获取会话别名映射失败: {e}")
+            return {}
+
+    async def update_favour_aliases(
+        self,
+        user_id: str,
+        session_id: str,
+        aliases: list[str],
+        locked: bool | None = None,
+    ) -> bool:
+        """更新用户的别名列表与锁定状态。"""
+        return await self.update_favour(
+            user_id=user_id,
+            session_id=session_id,
+            aliases=aliases,
+            aliases_locked=locked,
+        )
