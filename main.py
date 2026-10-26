@@ -4,6 +4,7 @@ import base64
 import json
 import mimetypes
 import re
+import time
 import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -173,6 +174,7 @@ class FavourManagerTool(Star):
         self.user_dialogue_rounds: dict[tuple[str, str], list[tuple[str, str]]] = {}
         self.pending_dialogue_round_updates: dict[tuple[str, str], int] = {}
         self.impression_refresh_locks: set[tuple[str, str]] = set()
+        self._group_members_cache: dict[str, tuple[float, set[str]]] = {}
 
         # 好感度回归配置
         reset_conf = self.config.get("favour_reset_config", {})
@@ -1363,17 +1365,98 @@ class FavourManagerTool(Star):
             user_aliases = record.get_aliases() if record else []
             user_aliases_str = ", ".join(user_aliases) if user_aliases else "暂无特定外号"
 
-            alias_session_key = "global" if self.is_global_favour else session_id
-            session_aliases_map = await self.db_manager.get_session_aliases_map(alias_session_key)
-            if session_aliases_map:
-                alias_rows = []
-                for m_uid, m_data in list(session_aliases_map.items())[:15]:
-                    m_name = m_data.get("user_name") or m_uid
-                    m_aliases = ", ".join(m_data.get("aliases") or [])
-                    alias_rows.append(f"- {m_name} (UID: {m_uid}): 常用称呼: [{m_aliases}]")
-                session_aliases_table_str = "\n".join(alias_rows)
-            else:
-                session_aliases_table_str = "无"
+            # 提取当前群聊标识
+            curr_group_id = ""
+            if hasattr(event, "get_group_id"):
+                gid = event.get_group_id()
+                curr_group_id = str(gid).strip() if gid else ""
+            if not curr_group_id and getattr(event, "unified_msg_origin", None):
+                origin = str(event.unified_msg_origin)
+                if "group" in origin.lower():
+                    curr_group_id = origin.split(":")[-1] if ":" in origin else origin
+            if not curr_group_id and not hasattr(event, "get_group_id"):
+                sid = getattr(event, "_session_id", None) or (session_id if session_id != "global" else "")
+                if sid and "group" in str(sid).lower():
+                    curr_group_id = str(sid)
+
+            # 构建群成员外号表：仅在群聊中注入，且无论是否开启全局好感度，均仅注入属于当前群聊的成员外号
+            session_aliases_table_str = "无"
+            if curr_group_id:
+                alias_session_key = "global" if self.is_global_favour else session_id
+                session_aliases_map = await self.db_manager.get_session_aliases_map(alias_session_key)
+                if session_aliases_map:
+                    # 确定属于当前群聊的成员 UID（确保全局好感模式下不注入其他非本群成员）
+                    group_member_uids: set[str] = {str(user_id)}
+                    now_ts = time.time()
+                    cached = getattr(self, "_group_members_cache", {}).get(curr_group_id)
+                    if cached and (now_ts - cached[0]) < 300:
+                        group_member_uids.update(cached[1])
+                    else:
+                        fetched_uids: set[str] = set()
+                        raw_gid = curr_group_id.split(":")[-1] if ":" in curr_group_id else curr_group_id
+                        bot = getattr(event, "bot", None)
+                        if not bot and hasattr(self, "context"):
+                            try:
+                                p_mgr = getattr(self.context, "platform_manager", None)
+                                if p_mgr:
+                                    insts = getattr(p_mgr, "get_insts", lambda: [])()
+                                    for inst in insts:
+                                        b = getattr(inst, "bot", None)
+                                        if b and (hasattr(b, "get_group_member_list") or hasattr(b, "call_action")):
+                                            bot = b
+                                            break
+                            except Exception:
+                                pass
+
+                        if bot:
+                            try:
+                                gid_param = int(raw_gid) if raw_gid.isdigit() else raw_gid
+                                if hasattr(bot, "get_group_member_list"):
+                                    m_list = await bot.get_group_member_list(group_id=gid_param)
+                                elif hasattr(bot, "call_action"):
+                                    m_list = await bot.call_action("get_group_member_list", group_id=gid_param)
+                                else:
+                                    m_list = None
+                                if isinstance(m_list, list):
+                                    for m in m_list:
+                                        mid = str(m.get("user_id") or "")
+                                        if mid:
+                                            fetched_uids.add(mid)
+                            except Exception as e:
+                                logger.debug(f"注入外号时获取群成员列表提示: {e}")
+
+                        try:
+                            db_uids = await self.db_manager.get_users_in_group(curr_group_id)
+                            for duid in db_uids:
+                                fetched_uids.add(str(duid))
+                        except Exception as e:
+                            logger.debug(f"注入外号时从数据库查询群成员提示: {e}")
+
+                        if fetched_uids:
+                            if not hasattr(self, "_group_members_cache"):
+                                self._group_members_cache = {}
+                            self._group_members_cache[curr_group_id] = (now_ts, fetched_uids)
+                            group_member_uids.update(fetched_uids)
+
+                    # 仅保留属于当前群聊的成员
+                    if self.is_global_favour:
+                        filtered_aliases = {
+                            uid: data
+                            for uid, data in session_aliases_map.items()
+                            if str(uid) in group_member_uids
+                        }
+                    else:
+                        filtered_aliases = session_aliases_map
+
+                    if filtered_aliases:
+                        alias_rows = []
+                        for m_uid, m_data in list(filtered_aliases.items())[:15]:
+                            m_name = m_data.get("user_name") or m_uid
+                            m_aliases = ", ".join(m_data.get("aliases") or [])
+                            alias_rows.append(f"- {m_name} (UID: {m_uid}): 常用称呼: [{m_aliases}]")
+                        if alias_rows:
+                            session_aliases_table_str = "\n".join(alias_rows)
+
             if self.favour_mode == "galgame":
                 mode_instruction = (
                     "模式：Galgame。\n"

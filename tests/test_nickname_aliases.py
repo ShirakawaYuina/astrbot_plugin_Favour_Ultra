@@ -24,6 +24,7 @@ class _DialogueEvent:
         message: str = "",
         message_obj: _FakeMessageObj | None = None,
         sender_name: str = "",
+        group_id: str | None = "__UNSET__",
     ):
         self._sender_id = user_id
         self._session_id = session_id
@@ -32,6 +33,13 @@ class _DialogueEvent:
         self._sender_name = sender_name or f"User_{user_id}"
         self._extras = {}
         self._result = SimpleNamespace(chain=[])
+        if group_id == "__UNSET__":
+            self._group_id = session_id if "group" in str(session_id).lower() else None
+        else:
+            self._group_id = group_id
+
+    def get_group_id(self) -> str | None:
+        return self._group_id
 
     def get_sender_id(self) -> str:
         return self._sender_id
@@ -82,7 +90,7 @@ def _build_test_plugin() -> FavourManagerTool:
     )
     plugin.relationship_pattern = re.compile(r"$^")
     plugin._is_favour_session_enabled = lambda _sid: True
-    plugin._get_session_id = lambda event: getattr(event, "_session_id", "group-1")
+    plugin._get_session_id = lambda event: "global" if plugin.is_global_favour else getattr(event, "_session_id", "group-1")
     plugin._get_daily_favour_change = lambda _uid: 0
     plugin._check_permission = AsyncMock(return_value=False)
     plugin._get_user_display_name = AsyncMock(side_effect=lambda evt, uid: f"Display_{uid}")
@@ -429,5 +437,69 @@ async def test_favour_prompt_postposition_and_fallback(tmp_path: Path):
     rec = await db.get_favour("1001", "group-1")
     # 原好感应保持不变
     assert rec is None or rec.favour == 0
+
+    await db.close()
+
+
+@pytest.mark.asyncio
+async def test_inject_favour_prompt_group_aliases_isolation(tmp_path: Path):
+    db = FavourDBManager(tmp_path)
+    await db.init_db()
+
+    plugin = _build_test_plugin()
+    plugin.is_global_favour = True
+    plugin.db_manager = db
+    plugin._is_favour_session_enabled = lambda _sid: True
+
+    # 1. 准备全局好感度数据与用户外号
+    # 用户 1001 (群 100 成员，外号: 牢尤)
+    await db.update_favour("1001", "global", favour=10, aliases=["牢尤"])
+    await db.record_daily_group_utterance(group_id="group-100", user_id="1001", user_name="User_1001", content="hello", date="2026-10-26")
+
+    # 用户 1002 (群 100 成员，外号: 小花)
+    await db.update_favour("1002", "global", favour=10, aliases=["小花"])
+    await db.record_daily_group_utterance(group_id="group-100", user_id="1002", user_name="User_1002", content="hello", date="2026-10-26")
+
+    # 用户 2001 (仅属于 群 200，外号: 异群人)
+    await db.update_favour("2001", "global", favour=10, aliases=["异群人"])
+    await db.record_daily_group_utterance(group_id="group-200", user_id="2001", user_name="User_2001", content="hello", date="2026-10-26")
+
+    # 2. 模拟群 100 中用户 1001 发送消息并注入 prompt
+    group_event = _DialogueEvent(
+        user_id="1001",
+        session_id="group-100",
+        message="你好",
+        group_id="group-100",
+    )
+    req_group = SimpleNamespace(system_prompt="system")
+    await plugin.inject_favour_prompt(group_event, req_group)
+
+    # 验证群聊 prompt：
+    # - 包含本群用户 1001 的外号 牢尤
+    # - 包含同群成员 1002 的外号 小花
+    # - 严禁包含异群成员 2001 的外号 异群人
+    assert "牢尤" in req_group.system_prompt
+    assert "小花" in req_group.system_prompt
+    assert "异群人" not in req_group.system_prompt
+    assert "- 1002 (UID: 1002): 常用称呼: [小花]" in req_group.system_prompt
+
+    # 3. 模拟私聊（无 group_id）时注入 prompt
+    private_event = _DialogueEvent(
+        user_id="1001",
+        session_id="private-1001",
+        message="你好",
+        group_id=None,
+    )
+    req_private = SimpleNamespace(system_prompt="system")
+    await plugin.inject_favour_prompt(private_event, req_private)
+
+    # 验证私聊 prompt：
+    # - 用户的常用外号/称呼 仍包含自身外号 牢尤
+    # - 当前会话成员常用称呼/外号表 必须为 无
+    # - 严禁包含其他用户的外号（小花、异群人）
+    assert "用户的常用外号/称呼：牢尤" in req_private.system_prompt
+    assert "当前会话成员常用称呼/外号表：\n无" in req_private.system_prompt
+    assert "小花" not in req_private.system_prompt
+    assert "异群人" not in req_private.system_prompt
 
     await db.close()
