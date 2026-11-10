@@ -771,23 +771,27 @@ class FavourManagerTool(Star):
                         session_key = "global" if self.is_global_favour else group_id
                         record = await self.db_manager.get_favour(uid, session_key)
 
-                        # 处理别名合并与锁定
-                        merged_aliases = None
-                        if record and record.aliases_locked:
-                            merged_aliases = None
-                        elif new_aliases:
+                        # 处理别名待审核逻辑（大模型自主提炼的外号需经过人工复核，存入待审核池）
+                        merged_pending = None
+                        if not (record and record.aliases_locked) and new_aliases:
                             old_aliases = record.get_aliases() if record else []
-                            merged = list(old_aliases)
+                            current_pending = record.get_pending_aliases() if record else []
+                            new_pending_list = list(current_pending)
                             for a in new_aliases:
-                                if a.lower() not in [x.lower() for x in merged]:
-                                    merged.append(a)
-                            merged_aliases = merged[-5:]
+                                clean_a = str(a).strip()
+                                if (
+                                    clean_a
+                                    and clean_a.lower() not in [x.lower() for x in old_aliases]
+                                    and clean_a.lower() not in [x.lower() for x in new_pending_list]
+                                ):
+                                    new_pending_list.append(clean_a)
+                            merged_pending = new_pending_list[:5]
 
                         await self.db_manager.update_favour(
                             user_id=uid,
                             session_id=session_key,
                             impression=impression if impression else None,
-                            aliases=merged_aliases,
+                            pending_aliases=merged_pending if merged_pending is not None else None,
                         )
                         if impression:
                             group_res[uid] = impression
@@ -1833,11 +1837,16 @@ or [好感度持平]
             merged.append(clean_nick)
             merged = merged[-5:]
 
+            # 若待审核池中存在该外号，直接转正并同步移出待审核池
+            pending_aliases = record.get_pending_aliases() if record else []
+            cleaned_pending = [a for a in pending_aliases if a.lower() != clean_nick.lower()]
+
             await self.db_manager.update_favour(
                 user_id=target_uid,
                 session_id=session_key,
                 nickname=target_name,
                 aliases=merged,
+                pending_aliases=cleaned_pending if len(cleaned_pending) != len(pending_aliases) else None,
             )
             return f"成功为用户 {target_name} ({target_uid}) 记录称呼: {clean_nick}，当前全部称呼: [{', '.join(merged)}]"
         except Exception as e:

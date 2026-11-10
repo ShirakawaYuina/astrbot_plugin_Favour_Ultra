@@ -15,6 +15,16 @@
       <button id="refresh" class="btn" type="button" data-i18n="refresh">刷新</button>
     </header>
 
+    <nav class="nav-tabs" role="tablist">
+      <button id="tab-records" class="tab-btn active" type="button" role="tab" aria-selected="true" data-tab="records">
+        <span data-i18n="tabRecords">全部成员好感度</span>
+      </button>
+      <button id="tab-pending" class="tab-btn" type="button" role="tab" aria-selected="false" data-tab="pending">
+        <span data-i18n="tabPending">外号审核</span>
+        <span id="pending-badge" class="tab-badge" hidden>0</span>
+      </button>
+    </nav>
+
     <section class="toolbar">
       <label class="field">
         <span data-i18n="session">会话</span>
@@ -54,7 +64,7 @@
     <section class="table-wrap">
       <table class="records">
         <thead>
-          <tr>
+          <tr id="records-header-row">
             <th data-i18n="colUser">用户</th>
             <th class="num" data-i18n="colFavour">好感度</th>
             <th data-i18n="colRelationship">关系</th>
@@ -63,6 +73,13 @@
             <th data-i18n="colAliases">常用外号/称呼</th>
             <th data-i18n="colUpdatedAt">更新时间</th>
             <th class="actions" data-i18n="colActions">操作</th>
+          </tr>
+          <tr id="pending-header-row" hidden>
+            <th data-i18n="colUser">用户</th>
+            <th data-i18n="colAliases">当前生效外号</th>
+            <th data-i18n="colPendingAliases">待审核外号 (大模型生成)</th>
+            <th data-i18n="colUpdatedAt">更新时间</th>
+            <th class="actions" data-i18n="colActions">审核操作</th>
           </tr>
         </thead>
         <tbody id="records-body"></tbody>

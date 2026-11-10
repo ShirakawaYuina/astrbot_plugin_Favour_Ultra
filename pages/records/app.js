@@ -26,6 +26,11 @@ const dom = {
   editorAllSessions: document.getElementById("editor-all-sessions"),
   editorError: document.getElementById("editor-error"),
   editorCancel: document.getElementById("editor-cancel"),
+  tabRecords: document.getElementById("tab-records"),
+  tabPending: document.getElementById("tab-pending"),
+  pendingBadge: document.getElementById("pending-badge"),
+  recordsHeaderRow: document.getElementById("records-header-row"),
+  pendingHeaderRow: document.getElementById("pending-header-row"),
 };
 
 const state = {
@@ -35,6 +40,7 @@ const state = {
   sessionId: GLOBAL_SESSION_ID,
   sessionName: "",
   editingRow: null,
+  currentTab: "records",
 };
 
 function t(key, fallback) {
@@ -105,124 +111,261 @@ async function toggleAliasLock(row) {
   }
 }
 
+async function reviewAlias(row, action, alias = "") {
+  try {
+    setStatus(t("saving", "保存中…"));
+    await bridge.apiPost("records/review_alias", {
+      user_id: row.user_id,
+      session_id: row.session_id || state.sessionId,
+      action: action,
+      alias: alias,
+    });
+    setStatus(action.startsWith("approve") ? t("approvedSuccess", "外号已审核通过") : t("rejectedSuccess", "外号已驳回"));
+    await load();
+  } catch (err) {
+    setStatus(err.message || t("actionFailed", "审核操作失败"), true);
+  }
+}
+
 function renderRows(rows) {
-  dom.body.replaceChildren(
-    ...rows.map((row) => {
-      const tr = document.createElement("tr");
+  if (state.currentTab === "pending") {
+    // 渲染待审核专用行
+    dom.body.replaceChildren(
+      ...rows.map((row) => {
+        const tr = document.createElement("tr");
 
-      const userCell = document.createElement("td");
-      const wrapper = document.createElement("div");
-      wrapper.className = "user-cell";
-      const avatar = document.createElement("img");
-      avatar.src = `https://q1.qlogo.cn/g?b=qq&nk=${encodeURIComponent(row.user_id)}&s=100`;
-      avatar.alt = "";
+        const userCell = document.createElement("td");
+        const wrapper = document.createElement("div");
+        wrapper.className = "user-cell";
+        const avatar = document.createElement("img");
+        avatar.src = `https://q1.qlogo.cn/g?b=qq&nk=${encodeURIComponent(row.user_id)}&s=100`;
+        avatar.alt = "";
 
-      const userMeta = document.createElement("div");
-      userMeta.className = "user-meta";
+        const userMeta = document.createElement("div");
+        userMeta.className = "user-meta";
 
-      const userName = document.createElement("span");
-      userName.className = "user-name";
-      userName.textContent = row.nickname || row.user_id;
+        const userName = document.createElement("span");
+        userName.className = "user-name";
+        userName.textContent = row.nickname || row.user_id;
 
-      userMeta.append(userName);
-      if (row.nickname && row.nickname !== row.user_id) {
-        const userId = document.createElement("span");
-        userId.className = "user-id";
-        userId.textContent = row.user_id;
-        userMeta.append(userId);
-      }
+        userMeta.append(userName);
+        if (row.nickname && row.nickname !== row.user_id) {
+          const userId = document.createElement("span");
+          userId.className = "user-id";
+          userId.textContent = row.user_id;
+          userMeta.append(userId);
+        }
 
-      wrapper.append(avatar, userMeta);
-      userCell.append(wrapper);
+        wrapper.append(avatar, userMeta);
+        userCell.append(wrapper);
 
-      const favourCell = document.createElement("td");
-      favourCell.className = "num";
-      favourCell.textContent = row.favour;
+        // 当前生效外号
+        const aliasesCell = document.createElement("td");
+        const aliasWrap = document.createElement("div");
+        aliasWrap.className = "alias-wrap";
+        const aliases = Array.isArray(row.aliases) ? row.aliases : [];
+        if (aliases.length > 0) {
+          aliases.forEach((alias) => {
+            const aChip = document.createElement("span");
+            aChip.className = "alias-chip";
+            aChip.textContent = alias;
+            aliasWrap.append(aChip);
+          });
+        } else {
+          const emptySpan = document.createElement("span");
+          emptySpan.className = "muted";
+          emptySpan.textContent = t("none", "无");
+          aliasWrap.append(emptySpan);
+        }
+        aliasesCell.append(aliasWrap);
 
-      const relationshipCell = document.createElement("td");
-      const chip = document.createElement("span");
-      chip.className = "chip";
-      chip.textContent = row.relationship || t("none", "无");
-      relationshipCell.append(chip);
+        // 待审核外号 (大模型生成)
+        const pendingCell = document.createElement("td");
+        const pendingWrap = document.createElement("div");
+        pendingWrap.className = "pending-alias-wrap";
+        const pendingList = Array.isArray(row.pending_aliases) ? row.pending_aliases : [];
+        if (pendingList.length > 0) {
+          pendingList.forEach((alias) => {
+            const item = document.createElement("span");
+            item.className = "pending-alias-item";
 
-      const todayCell = document.createElement("td");
-      todayCell.className = "num";
-      const delta = document.createElement("span");
-      const change = Number(row.today_change) || 0;
-      delta.className = `delta ${change > 0 ? "positive" : change < 0 ? "negative" : ""}`.trim();
-      delta.textContent = change > 0 ? `+${change}` : change;
-      todayCell.append(delta);
+            const text = document.createElement("span");
+            text.className = "pending-alias-text";
+            text.textContent = alias;
 
-      const impressionCell = document.createElement("td");
-      if (row.impression) {
-        impressionCell.textContent = row.impression;
-      } else {
-        impressionCell.className = "muted";
-        impressionCell.textContent = t("none", "无");
-      }
+            const btnApprove = document.createElement("button");
+            btnApprove.type = "button";
+            btnApprove.className = "btn-icon-action approve";
+            btnApprove.title = t("approve", "通过");
+            btnApprove.textContent = "✔";
+            btnApprove.addEventListener("click", () => reviewAlias(row, "approve", alias));
 
-      // 称呼/外号单元格
-      const aliasesCell = document.createElement("td");
-      const aliasWrap = document.createElement("div");
-      aliasWrap.className = "alias-wrap";
+            const btnReject = document.createElement("button");
+            btnReject.type = "button";
+            btnReject.className = "btn-icon-action reject";
+            btnReject.title = t("reject", "拒绝");
+            btnReject.textContent = "✖";
+            btnReject.addEventListener("click", () => reviewAlias(row, "reject", alias));
 
-      const aliases = Array.isArray(row.aliases) ? row.aliases : [];
-      if (aliases.length > 0) {
-        aliases.forEach((alias) => {
-          const aChip = document.createElement("span");
-          aChip.className = "alias-chip";
-          aChip.textContent = alias;
-          aliasWrap.append(aChip);
+            item.append(text, btnApprove, btnReject);
+            pendingWrap.append(item);
+          });
+        } else {
+          const emptySpan = document.createElement("span");
+          emptySpan.className = "muted";
+          emptySpan.textContent = t("none", "无");
+          pendingWrap.append(emptySpan);
+        }
+        pendingCell.append(pendingWrap);
+
+        const updatedCell = document.createElement("td");
+        updatedCell.textContent = row.updated_at || "-";
+
+        // 操作列：一键全部通过 / 全部拒绝
+        const actionsCell = document.createElement("td");
+        actionsCell.className = "actions";
+        const reviewWrap = document.createElement("div");
+        reviewWrap.className = "review-actions";
+
+        const approveAllBtn = document.createElement("button");
+        approveAllBtn.type = "button";
+        approveAllBtn.className = "btn link";
+        approveAllBtn.textContent = t("approveAll", "全部通过");
+        approveAllBtn.addEventListener("click", () => reviewAlias(row, "approve_all"));
+
+        const rejectAllBtn = document.createElement("button");
+        rejectAllBtn.type = "button";
+        rejectAllBtn.className = "btn link danger";
+        rejectAllBtn.textContent = t("rejectAll", "全部拒绝");
+        rejectAllBtn.addEventListener("click", () => reviewAlias(row, "reject_all"));
+
+        reviewWrap.append(approveAllBtn, rejectAllBtn);
+        actionsCell.append(reviewWrap);
+
+        tr.append(userCell, aliasesCell, pendingCell, updatedCell, actionsCell);
+        return tr;
+      })
+    );
+  } else {
+    // 渲染普通全部成员好感度行
+    dom.body.replaceChildren(
+      ...rows.map((row) => {
+        const tr = document.createElement("tr");
+
+        const userCell = document.createElement("td");
+        const wrapper = document.createElement("div");
+        wrapper.className = "user-cell";
+        const avatar = document.createElement("img");
+        avatar.src = `https://q1.qlogo.cn/g?b=qq&nk=${encodeURIComponent(row.user_id)}&s=100`;
+        avatar.alt = "";
+
+        const userMeta = document.createElement("div");
+        userMeta.className = "user-meta";
+
+        const userName = document.createElement("span");
+        userName.className = "user-name";
+        userName.textContent = row.nickname || row.user_id;
+
+        userMeta.append(userName);
+        if (row.nickname && row.nickname !== row.user_id) {
+          const userId = document.createElement("span");
+          userId.className = "user-id";
+          userId.textContent = row.user_id;
+          userMeta.append(userId);
+        }
+
+        wrapper.append(avatar, userMeta);
+        userCell.append(wrapper);
+
+        const favourCell = document.createElement("td");
+        favourCell.className = "num";
+        favourCell.textContent = row.favour;
+
+        const relationshipCell = document.createElement("td");
+        const chip = document.createElement("span");
+        chip.className = "chip";
+        chip.textContent = row.relationship || t("none", "无");
+        relationshipCell.append(chip);
+
+        const todayCell = document.createElement("td");
+        todayCell.className = "num";
+        const delta = document.createElement("span");
+        const change = Number(row.today_change) || 0;
+        delta.className = `delta ${change > 0 ? "positive" : change < 0 ? "negative" : ""}`.trim();
+        delta.textContent = change > 0 ? `+${change}` : change;
+        todayCell.append(delta);
+
+        const impressionCell = document.createElement("td");
+        if (row.impression) {
+          impressionCell.textContent = row.impression;
+        } else {
+          impressionCell.className = "muted";
+          impressionCell.textContent = t("none", "无");
+        }
+
+        // 称呼/外号单元格
+        const aliasesCell = document.createElement("td");
+        const aliasWrap = document.createElement("div");
+        aliasWrap.className = "alias-wrap";
+
+        const aliases = Array.isArray(row.aliases) ? row.aliases : [];
+        if (aliases.length > 0) {
+          aliases.forEach((alias) => {
+            const aChip = document.createElement("span");
+            aChip.className = "alias-chip";
+            aChip.textContent = alias;
+            aliasWrap.append(aChip);
+          });
+        } else {
+          const emptySpan = document.createElement("span");
+          emptySpan.className = "muted";
+          emptySpan.textContent = t("none", "无");
+          aliasWrap.append(emptySpan);
+        }
+
+        const lockBtn = document.createElement("button");
+        lockBtn.type = "button";
+        lockBtn.className = `lock-btn ${row.aliases_locked ? "locked" : ""}`.trim();
+        lockBtn.title = row.aliases_locked ? t("lockedHint", "已锁定，点击解锁") : t("unlockedHint", "未锁定，点击锁定");
+        lockBtn.textContent = row.aliases_locked ? "🔒" : "🔓";
+        lockBtn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          await toggleAliasLock(row);
         });
-      } else {
-        const emptySpan = document.createElement("span");
-        emptySpan.className = "muted";
-        emptySpan.textContent = t("none", "无");
-        aliasWrap.append(emptySpan);
-      }
+        aliasWrap.append(lockBtn);
+        aliasesCell.append(aliasWrap);
 
-      const lockBtn = document.createElement("button");
-      lockBtn.type = "button";
-      lockBtn.className = `lock-btn ${row.aliases_locked ? "locked" : ""}`.trim();
-      lockBtn.title = row.aliases_locked ? t("lockedHint", "已锁定，点击解锁") : t("unlockedHint", "未锁定，点击锁定");
-      lockBtn.textContent = row.aliases_locked ? "🔒" : "🔓";
-      lockBtn.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        await toggleAliasLock(row);
-      });
-      aliasWrap.append(lockBtn);
-      aliasesCell.append(aliasWrap);
+        const updatedCell = document.createElement("td");
+        updatedCell.textContent = row.updated_at || "-";
 
-      const updatedCell = document.createElement("td");
-      updatedCell.textContent = row.updated_at || "-";
+        const actionsCell = document.createElement("td");
+        actionsCell.className = "actions";
+        const editButton = document.createElement("button");
+        editButton.type = "button";
+        editButton.className = "btn link";
+        editButton.textContent = t("edit", "编辑");
+        editButton.addEventListener("click", () => openEditor(row));
+        const deleteButton = document.createElement("button");
+        deleteButton.type = "button";
+        deleteButton.className = "btn link danger";
+        deleteButton.textContent = t("delete", "删除");
+        deleteButton.addEventListener("click", () => deleteRow(row));
+        actionsCell.append(editButton, deleteButton);
 
-      const actionsCell = document.createElement("td");
-      actionsCell.className = "actions";
-      const editButton = document.createElement("button");
-      editButton.type = "button";
-      editButton.className = "btn link";
-      editButton.textContent = t("edit", "编辑");
-      editButton.addEventListener("click", () => openEditor(row));
-      const deleteButton = document.createElement("button");
-      deleteButton.type = "button";
-      deleteButton.className = "btn link danger";
-      deleteButton.textContent = t("delete", "删除");
-      deleteButton.addEventListener("click", () => deleteRow(row));
-      actionsCell.append(editButton, deleteButton);
-
-      tr.append(
-        userCell,
-        favourCell,
-        relationshipCell,
-        todayCell,
-        impressionCell,
-        aliasesCell,
-        updatedCell,
-        actionsCell,
-      );
-      return tr;
-    }),
-  );
+        tr.append(
+          userCell,
+          favourCell,
+          relationshipCell,
+          todayCell,
+          impressionCell,
+          aliasesCell,
+          updatedCell,
+          actionsCell,
+        );
+        return tr;
+      }),
+    );
+  }
   dom.empty.hidden = rows.length > 0;
 }
 
@@ -242,6 +385,22 @@ function renderSessionFilter(sessions) {
   state.sessionName = dom.sessionFilter.selectedOptions[0]?.textContent || state.sessionId;
 }
 
+function switchTab(tab) {
+  if (state.currentTab === tab) return;
+  state.currentTab = tab;
+  dom.tabRecords.classList.toggle("active", tab === "records");
+  dom.tabRecords.setAttribute("aria-selected", tab === "records");
+  dom.tabPending.classList.toggle("active", tab === "pending");
+  dom.tabPending.setAttribute("aria-selected", tab === "pending");
+
+  dom.recordsHeaderRow.hidden = (tab === "pending");
+  dom.pendingHeaderRow.hidden = (tab !== "pending");
+  dom.overview.hidden = (tab === "pending");
+
+  state.page = 1;
+  load();
+}
+
 async function load() {
   dom.refresh.disabled = true;
   setStatus(t("loading", "加载中…"));
@@ -253,6 +412,7 @@ async function load() {
       desc: dom.sortDesc.value,
       page: state.page,
       page_size: state.pageSize,
+      only_pending: state.currentTab === "pending",
     });
 
     state.page = data.page;
@@ -260,8 +420,19 @@ async function load() {
     state.totalPages = data.total_pages;
     state.sessionId = data.session_id;
 
+    // 更新待审核徽章
+    const pendingTotal = data.overview?.pending_total || 0;
+    if (pendingTotal > 0) {
+      dom.pendingBadge.hidden = false;
+      dom.pendingBadge.textContent = pendingTotal;
+    } else {
+      dom.pendingBadge.hidden = true;
+    }
+
     renderSessionFilter(data.sessions || []);
-    renderOverview(data.overview);
+    if (state.currentTab === "records") {
+      renderOverview(data.overview);
+    }
     renderRows(data.rows || []);
 
     dom.pagerLabel.textContent = `${state.page} / ${state.totalPages} · ${t(
@@ -393,6 +564,8 @@ dom.next.addEventListener("click", () => {
 
 dom.editorCancel.addEventListener("click", () => dom.editor.close());
 dom.editorForm.addEventListener("submit", submitEditor);
+dom.tabRecords.addEventListener("click", () => switchTab("records"));
+dom.tabPending.addEventListener("click", () => switchTab("pending"));
 
 await bridge.ready();
 applyI18n();

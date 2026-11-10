@@ -54,6 +54,12 @@ class FavourWebApi:
             ["POST"],
             "删除好感度记录",
         )
+        self.plugin.context.register_web_api(
+            f"/{PLUGIN_NAME}/records/review_alias",
+            self.review_alias,
+            ["POST"],
+            "审核大模型生成的外号",
+        )
 
     async def list_records(self):
         """返回指定会话的记录列表、概览统计和可选会话列表。
@@ -151,6 +157,7 @@ class FavourWebApi:
                     "impression": str(record.impression or ""),
                     "aliases": record.get_aliases() if hasattr(record, "get_aliases") else [],
                     "aliases_locked": bool(getattr(record, "aliases_locked", False)),
+                    "pending_aliases": record.get_pending_aliases() if hasattr(record, "get_pending_aliases") else [],
                     "interact_count": int(record.interact_count or 0),
                     "dialogue_round_count": int(record.dialogue_round_count or 0),
                     "today_change": self.plugin._get_daily_favour_change(uid),
@@ -171,11 +178,20 @@ class FavourWebApi:
                 }
             )
 
+        # 待审核总数统计
+        pending_total = sum(1 for row in rows if row.get("pending_aliases"))
+
+        # 仅查看待审核外号用户筛选
+        only_pending = str(request.query.get("only_pending", "false") or "false").lower() in ("true", "1")
+        if only_pending:
+            rows = [row for row in rows if row.get("pending_aliases")]
+
         # 概览统计基于当前筛选视图的全部匹配项
         favour_values = [row["favour"] for row in rows]
         today_changes = [row["today_change"] for row in rows]
         overview = {
             "total": len(rows),
+            "pending_total": pending_total,
             "average_favour": round(sum(favour_values) / len(favour_values), 1)
             if favour_values
             else 0,
@@ -193,6 +209,7 @@ class FavourWebApi:
                 or keyword in row.get("nickname", "").lower()
                 or keyword in row["impression"].lower()
                 or any(keyword in a.lower() for a in row.get("aliases", []))
+                or any(keyword in pa.lower() for pa in row.get("pending_aliases", []))
             ]
 
         # 排序
@@ -513,3 +530,67 @@ class FavourWebApi:
         if not deleted:
             return error_response(message, status_code=400)
         return json_response({"ok": True})
+
+
+    async def review_alias(self):
+        """审核待生效的外号（通过/拒绝单个外号，或整行全部通过/拒绝）。"""
+        try:
+            payload = await request.json()
+        except Exception:
+            return error_response("无效的 JSON 请求体", status_code=400)
+
+        if not isinstance(payload, dict):
+            return error_response("请求体必须为 JSON 对象", status_code=400)
+
+        user_id = str(payload.get("user_id") or "").strip()
+        session_id = str(payload.get("session_id") or GLOBAL_SESSION_ID).strip()
+        action = str(payload.get("action") or "").strip().lower()
+        alias = str(payload.get("alias") or "").strip()
+
+        if not user_id:
+            return error_response("缺少 user_id", status_code=400)
+        if action not in ("approve", "reject", "approve_all", "reject_all"):
+            return error_response("无效的 action (可选: approve, reject, approve_all, reject_all)", status_code=400)
+
+        record = await self.plugin.db_manager.get_favour(user_id, session_id)
+        if not record:
+            return error_response("未找到该用户的好感度记录", status_code=404)
+
+        current_aliases = record.get_aliases()
+        current_pending = record.get_pending_aliases()
+
+        if action == "approve":
+            if not alias:
+                return error_response("缺少待通过的 alias", status_code=400)
+            current_pending = [a for a in current_pending if a.lower() != alias.lower()]
+            if alias.lower() not in [x.lower() for x in current_aliases]:
+                current_aliases.append(alias)
+                current_aliases = current_aliases[-5:]
+        elif action == "reject":
+            if not alias:
+                return error_response("缺少待拒绝的 alias", status_code=400)
+            current_pending = [a for a in current_pending if a.lower() != alias.lower()]
+        elif action == "approve_all":
+            for a in current_pending:
+                if a.lower() not in [x.lower() for x in current_aliases]:
+                    current_aliases.append(a)
+            current_aliases = current_aliases[-5:]
+            current_pending = []
+        elif action == "reject_all":
+            current_pending = []
+
+        success = await self.plugin.db_manager.update_favour(
+            user_id=user_id,
+            session_id=session_id,
+            aliases=current_aliases,
+            pending_aliases=current_pending,
+        )
+        if not success:
+            return error_response("更新数据库记录失败", status_code=500)
+
+        return success_response({
+            "user_id": user_id,
+            "session_id": session_id,
+            "aliases": current_aliases,
+            "pending_aliases": current_pending,
+        })

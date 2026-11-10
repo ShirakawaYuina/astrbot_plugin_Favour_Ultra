@@ -35,6 +35,7 @@ class FavourRecord(SQLModel, table=True):
     is_unique: bool = Field(default=False)
     aliases: str = Field(default="[]")
     aliases_locked: bool = Field(default=False)
+    pending_aliases: str = Field(default="[]")
 
     def get_aliases(self) -> list[str]:
         """获取结构化别名列表。"""
@@ -42,6 +43,18 @@ class FavourRecord(SQLModel, table=True):
             return []
         try:
             val = json.loads(self.aliases)
+            if isinstance(val, list):
+                return [str(x).strip() for x in val if str(x).strip()]
+            return []
+        except Exception:
+            return []
+
+    def get_pending_aliases(self) -> list[str]:
+        """获取结构化待审核别名列表。"""
+        if not self.pending_aliases:
+            return []
+        try:
+            val = json.loads(self.pending_aliases)
             if isinstance(val, list):
                 return [str(x).strip() for x in val if str(x).strip()]
             return []
@@ -235,6 +248,12 @@ class FavourDBManager:
                             text("ALTER TABLE favour_records ADD COLUMN aliases_locked BOOLEAN DEFAULT 0")
                         )
                         logger.info("favour_records 已添加 aliases_locked 列")
+                    if fav_cols and "pending_aliases" not in fav_cols:
+                        logger.info("favour_records 缺少 pending_aliases 列，执行自动迁移添加...")
+                        await conn.execute(
+                            text("ALTER TABLE favour_records ADD COLUMN pending_aliases TEXT DEFAULT '[]'")
+                        )
+                        logger.info("favour_records 已添加 pending_aliases 列")
 
                 self._initialized = True
                 logger.info(f"好感度数据库已初始化: {self.db_path}")
@@ -371,6 +390,7 @@ class FavourDBManager:
         nickname: str | None = None,
         aliases: list[str] | str | None = None,
         aliases_locked: bool | None = None,
+        pending_aliases: list[str] | str | None = None,
     ) -> bool:
         """更新好感度记录"""
         await self.init_db()
@@ -426,6 +446,11 @@ class FavourDBManager:
                             else (aliases or "[]")
                         ),
                         aliases_locked=bool(aliases_locked) if aliases_locked is not None else False,
+                        pending_aliases=(
+                            json.dumps(pending_aliases, ensure_ascii=False)
+                            if isinstance(pending_aliases, list)
+                            else (pending_aliases or "[]")
+                        ),
                     )
                     session.add(record)
                 else:
@@ -454,6 +479,11 @@ class FavourDBManager:
                             record.aliases = aliases
                     if aliases_locked is not None:
                         record.aliases_locked = bool(aliases_locked)
+                    if pending_aliases is not None:
+                        if isinstance(pending_aliases, list):
+                            record.pending_aliases = json.dumps(pending_aliases, ensure_ascii=False)
+                        elif isinstance(pending_aliases, str):
+                            record.pending_aliases = pending_aliases
                     record.updated_at = datetime.now()
                     session.add(record)
 
